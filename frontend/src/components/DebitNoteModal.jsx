@@ -37,9 +37,12 @@ const DebitNoteModal = ({ invoice, onClose, onConfirm }) => {
     `DN-${invoice.invoiceNo}-${Date.now().toString().slice(-4)}`
   );
 
-  const [items, setItems] = useState(
-    invoice.items.map((item) => ({ ...item, newPrice: item.price }))
-  );
+const [items, setItems] = useState(
+  (invoice?.items || []).map((item) => ({
+    ...item,
+    newPrice: item.price
+  }))
+);
 
   const handlePriceChange = (index, value) => {
     const parsed = Math.max(0, Number(value) || 0);

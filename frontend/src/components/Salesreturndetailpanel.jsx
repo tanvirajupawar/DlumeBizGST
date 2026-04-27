@@ -124,23 +124,29 @@ const SalesReturnDetailPanel = ({ note, onClose }) => {
         </div>
 
         {/* Meta row */}
-        <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100">
-          <div className="px-5 py-3">
-            <p className="text-[10px] uppercase text-gray-400">Date</p>
-            <p className="text-sm font-medium">{note.date}</p>
-          </div>
-          <div className="px-5 py-3">
-            <p className="text-[10px] uppercase text-gray-400">Amount</p>
-            <p className="text-sm font-medium">{fmt(note.amount)}</p>
-          </div>
-          <div className="px-5 py-3">
-            <p className="text-[10px] uppercase text-gray-400">Status</p>
-            <span className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-700">
-              {note.status || "—"}
-            </span>
-          </div>
-        </div>
+     <div className="grid grid-cols-2 divide-x divide-gray-100 border-b border-gray-100">
 
+  {/* Customer */}
+  <div className="px-5 py-3">
+    <p className="text-sm font-semibold text-gray-800">
+      {note.customerName || note.partyName || "Walk-in"}
+    </p>
+    {note.companyName && (
+      <p className="text-xs text-gray-400">{note.companyName}</p>
+    )}
+  </div>
+
+  {/* Date */}
+  <div className="px-5 py-3">
+    <p className="text-[10px] uppercase text-gray-400">Date</p>
+    <p className="text-sm font-medium">
+      {new Date(note.date)
+        .toLocaleDateString("en-GB")
+        .replace(/\//g, "-")}
+    </p>
+  </div>
+
+</div>
         {/* Items Table */}
         <div className="flex-1 overflow-y-auto">
           <div className="px-6 pt-5 pb-2">
@@ -163,7 +169,7 @@ const SalesReturnDetailPanel = ({ note, onClose }) => {
                 {note.items.map((row, i) => (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className="px-6 py-3 text-xs font-medium">
-                      {row.item || row.name}
+                   {row.name || row.item || row.item_name || "—"}
                     </td>
                     <td className="px-4 py-3 text-xs text-right">{row.qty}</td>
                     <td className="px-4 py-3 text-xs text-right">

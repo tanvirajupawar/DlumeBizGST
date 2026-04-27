@@ -5,10 +5,11 @@ import { useNavigate } from "react-router-dom";
 const reportSections = [
   {
     title: "GST",
-  reports: [
-  "GSTR-2 (Purchase)",
-  "Purchase Summary",  
-],
+    reports: [
+      "GSTR-2 (Purchase)",
+
+      "GSTR-1 (Sales)",
+    ],
   },
 ];
 
@@ -40,13 +41,18 @@ const Reports = () => {
               {section.reports.map((report) => (
                 <div
                   key={report}
-                 onClick={() => {
+onClick={() => {
   if (report === "Purchase Summary") {
     navigate("/reports/purchase-summary");
   }
 
   if (report === "GSTR-2 (Purchase)") {
     navigate("/reports/gstr2-purchase");
+  }
+
+
+  if (report === "GSTR-1 (Sales)") {
+    navigate("/reports/gstr1-sales");
   }
 }}
                   className="flex items-center justify-between text-sm text-gray-700 hover:text-blue-600 cursor-pointer"

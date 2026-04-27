@@ -52,29 +52,45 @@ const fetchCustomers = async () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [savedPayment, setSavedPayment] = useState(null);
 
-  const handleSavePayment = () => {
-    const today = new Date().toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
+const handleSavePayment = async () => {
+  try {
+    const res = await axios.post("http://localhost:8000/api/payment-in", {
+      customer_id: selectedCustomer.id,
+      amount: Number(paymentAmount),
+      payment_mode: paymentMode,
+      remark,
     });
 
-    // Save payment details for success screen
-    setSavedPayment({
-      amount: paymentAmount,
-      method: paymentMode,
-      date: today,
-      customer: {
-        first_name: selectedCustomer?.name?.split(" ")[0] || "",
-        last_name: selectedCustomer?.name?.split(" ").slice(1).join(" ") || "",
-        contact_no_1: selectedCustomer?.phone || "",
-      },
-    });
+    if (res.data.success) {
+      const today = new Date().toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
 
-    // Close modal, show success screen
-    setShowPayModal(false);
-    setShowSuccess(true);
-  };
+      setSavedPayment({
+        amount: paymentAmount,
+        method: paymentMode,
+        date: today,
+        customer: {
+          first_name: selectedCustomer?.name?.split(" ")[0] || "",
+          last_name: selectedCustomer?.name?.split(" ").slice(1).join(" ") || "",
+          contact_no_1: selectedCustomer?.phone || "",
+        },
+      });
+
+      setShowPayModal(false);
+      setShowSuccess(true);
+
+      // 🔥 refresh list
+      fetchCustomers();
+    }
+
+  } catch (err) {
+    console.error(err);
+    alert("Payment failed");
+  }
+};
 
   const handleSuccessDone = () => {
     setShowSuccess(false);
@@ -114,11 +130,21 @@ const fetchCustomers = async () => {
 data={customers.map((c, index) => ({
   sr: index + 1,
   id: c._id,
-  name: `${c.first_name} ${c.last_name}`,
-  company: c.company_name,
-  address: c.customer_address_line1,
-  phone: c.customer_phone,
-  outstanding: "₹0",
+
+  name: `${c.first_name || ""} ${c.last_name || ""}`,
+
+  company: c.company_name || "-",
+
+  address: [
+    c.address_line_1,
+    c.address_line_2,
+    c.city,
+    c.state,
+  ].filter(Boolean).join(", ") || "-",
+
+  phone: c.contact_no_1 || c.contact_no_2 || "-",
+
+  outstanding: `₹${c.pending_amount || 0}`,
 }))}
   searchPlaceholder="Search customers..."
 

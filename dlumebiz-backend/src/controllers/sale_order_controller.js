@@ -114,10 +114,13 @@ fetch: async function (req, res) {
 
     console.log("FILTER:", filter);
 
-    const orders = await SaleOrderModel.find(filter)
-      .populate("client_id")
-      .populate("details")
-      .sort({ createdOn: -1 });
+const orders = await SaleOrderModel.find(filter)
+  .populate({
+    path: "client_id",
+    select: "first_name last_name company_name gst state"
+  })
+  .populate("details")
+  .sort({ createdOn: -1 });
 
     return res.json({
       success: true,

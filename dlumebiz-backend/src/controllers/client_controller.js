@@ -58,22 +58,27 @@ create: async function (req, res) {
     // ✅ Split name into first + last
     const nameParts = (body.customer_name || "").trim().split(" ");
 
-    const data = {
-      first_name: nameParts[0] || "",
-      last_name: nameParts.slice(1).join(" ") || "",
+const data = {
+  first_name: nameParts[0] || "",
+  last_name: nameParts.slice(1).join(" ") || "",
 
-      company_name: body.company_name,
-      phone: body.customer_phone,
-      email: body.customer_email,
-      address: body.customer_address_line1,
+  company_name: body.company_name,
 
-      gstin: body.customer_gstin,
-      pan: body.customer_pan,
+  contact_no_1: body.customer_phone,
+  contact_no_2: body.customer_alt_phone || "",
 
-      city: body.customer_city,
-      state: body.customer_state,
-      pincode: body.customer_pincode,
-    };
+  email: body.customer_email,
+
+  address_line_1: body.customer_address_line1,
+  address_line_2: body.customer_address_line2 || "",
+
+  gst: body.customer_gstin || "",   
+  pan: body.customer_pan || "",
+
+  city: body.customer_city,
+  state: body.customer_state,
+  pincode: body.customer_pincode,
+};
 
     console.log("Mapped Data:", data); // debug
 

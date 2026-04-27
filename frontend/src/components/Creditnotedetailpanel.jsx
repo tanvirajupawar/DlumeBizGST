@@ -102,28 +102,45 @@ const CreditNoteDetailPanel = ({ note, onClose }) => {
         {/* Header */}
         <div className="flex justify-between px-6 pt-5 pb-4 border-b border-gray-100">
           <div>
-            <p className="text-base font-semibold">{note.partyName}</p>
-            <p className="text-xs font-mono text-gray-400">{note.creditNo}</p>
+  <div>
+  <p className="text-xs font-mono text-gray-400 mt-0.5">
+    {note.creditNo}
+  </p>
+</div>
           </div>
           <button onClick={handleClose}><FiX /></button>
         </div>
 
         {/* Meta */}
-        <div className="grid grid-cols-3 border-b border-gray-100">
-          <div className="px-5 py-3">
-            <p className="text-xs text-gray-400">Date</p>
-            <p>{note.date}</p>
-          </div>
-          <div className="px-5 py-3">
-            <p className="text-xs text-gray-400">Amount</p>
-            <p>{fmt(note.amount)}</p>
-          </div>
-          <div className="px-5 py-3">
-            <p className="text-xs text-gray-400">Invoice</p>
-            <p>{note.invoiceNo}</p>
-          </div>
-        </div>
+     <div className="grid grid-cols-2 divide-x divide-gray-100 border-b border-gray-100">
 
+  {/* Customer */}
+  <div className="px-5 py-3">
+    <p className="text-sm font-semibold text-gray-800">
+      {note.customerName || note.partyName || "Walk-in"}
+    </p>
+    {note.companyName && (
+      <p className="text-xs text-gray-400">{note.companyName}</p>
+    )}
+  </div>
+
+  {/* Date */}
+  <div className="px-5 py-3">
+    <p className="text-[10px] uppercase text-gray-400">Date</p>
+    <p className="text-sm font-medium">
+{(() => {
+  if (!note.date) return "—";
+
+  const d = new Date(note.date);
+
+  if (isNaN(d)) return note.date; // already formatted
+
+  return d.toLocaleDateString("en-GB").replace(/\//g, "-");
+})()}
+    </p>
+  </div>
+
+</div>
         {/* Items */}
         <div className="flex-1 overflow-y-auto">
           <div className="px-6 pt-5 pb-2">
@@ -145,7 +162,9 @@ const CreditNoteDetailPanel = ({ note, onClose }) => {
               <tbody>
                 {note.items.map((i, idx) => (
                   <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-6 py-3">{i.item}</td>
+                    <td className="px-6 py-3 text-xs font-medium">
+  {i.item || i.name || i.item_name || "—"}
+</td>
                     <td className="px-4 py-3 text-right">{i.qty}</td>
                     <td className="px-4 py-3 text-right">{fmt(i.rate)}</td>
                     <td className="px-6 py-3 text-right font-semibold">{fmt(i.total)}</td>

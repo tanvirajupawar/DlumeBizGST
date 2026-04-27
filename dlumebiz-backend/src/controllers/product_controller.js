@@ -172,34 +172,68 @@ const formatted = products.map((p) => ({
             });
         }
     },
-  update: async function (req, res) {
-    try {
-        const id = req.params.id;
-        const updateData = req.body;
+update: async function (req, res) {
+  try {
+    const id = req.params.id;
+    const data = req.body;
 
-        const updatedService = await productModel.findByIdAndUpdate(
-            id,
-            updateData,
-            {
-                new: true,
-                runValidators: true,
-            }
-        );
+    // 1. Update product basic details
+    const updatedProduct = await productModel.findByIdAndUpdate(
+      id,
+      data,
+      { new: true, runValidators: true }
+    );
 
-        if (!updatedService) {
-            return res
-                .status(404)
-                .json({ success: false, message: "Product not found" });
-        }
-
-        return res.json({ success: true, data: updatedService });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Server Error",
-            error: error.message || error,
-        });
+    if (!updatedProduct) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
     }
+
+    // 2. HANDLE STOCK LOGIC 🔥
+    const add = Number(data.stock_in || 0);
+    const sub = Number(data.stock_out || 0);
+
+    let stock = await StockManagementModel.findOne({ product_id: id });
+
+    if (!stock) {
+      stock = new StockManagementModel({
+        product_id: id,
+        company_id: updatedProduct.company_id,
+        in: 0,
+        out: 0,
+        total_stock: 0
+      });
+    }
+
+    // ✅ ADD LOGIC
+    stock.in += add;
+
+    // ✅ SUBTRACT LOGIC
+    stock.out += sub;
+
+    // ✅ TOTAL LOGIC (MAIN RULE)
+    stock.total_stock = Math.max(
+      (stock.total_stock || 0) + add - sub,
+      0
+    );
+
+    await stock.save();
+
+    return res.json({
+      success: true,
+      message: "Product updated successfully",
+      data: updatedProduct
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message || error
+    });
+  }
 },
     add: async function (req, res) {
         try {

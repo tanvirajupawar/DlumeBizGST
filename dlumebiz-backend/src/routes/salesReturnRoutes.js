@@ -13,36 +13,71 @@ router.post("/sales-return", async (req, res) => {
 
     console.log("📦 RECEIVED DATA:", data);
 
-    // ✅ SAVE SALES RETURN
+    // ✅ FIX: support both client_id and customer_id
+    const clientId = data.client_id || data.customer_id;
+
+    if (!data.sales_id || !clientId) {
+      return res.status(400).json({
+        success: false,
+        message: "sales_id and client_id are required",
+      });
+    }
+
+    data.client_id = clientId; // normalize
+
+    // ✅ FILTER VALID ITEMS
+    data.details = (data.details || []).filter(
+      (item) => item.qty && item.qty > 0
+    );
+
+    if (!data.details.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid return items",
+      });
+    }
+
+    // ✅ GENERATE LATEST RETURN NUMBER (SAFE)
+    const last = await SalesReturn.findOne().sort({ createdAt: -1 });
+
+    let next = 1;
+
+    if (last && last.return_no) {
+      const parts = last.return_no.split("-");
+      const num = parseInt(parts[1]);
+      if (!isNaN(num)) next = num + 1;
+    }
+
+    data.return_no = `SR-${String(next).padStart(5, "0")}`;
+
+    // ✅ SAVE
     const newReturn = new SalesReturn(data);
     await newReturn.save();
 
     console.log("✅ SALES RETURN SAVED:", newReturn._id);
 
-    // 🔥 UPDATE STOCK (VERY IMPORTANT)
-    if (Array.isArray(data.details) && data.details.length > 0) {
-      for (let item of data.details) {
-        const qty = parseInt(item.qty) || 0;
+    // ✅ UPDATE STOCK
+    for (let item of data.details) {
+      if (!item.product_id) continue;
 
-        const stock = await StockManagementModel.findOne({
-          product_id: item.product_id, // ⚠️ must match your system
-        });
+      const qty = parseInt(item.qty) || 0;
 
-        if (stock) {
-          stock.out = (stock.out || 0) - qty;       // reverse sale
-          if (stock.out < 0) stock.out = 0;
+      const stock = await StockManagementModel.findOne({
+        product_id: item.product_id,
+      });
 
-          stock.total_stock = (stock.total_stock || 0) + qty;
+      if (!stock) continue;
 
-          await stock.save();
-        }
-      }
+      stock.out = Math.max((stock.out || 0) - qty, 0);
+      stock.total_stock = (stock.total_stock || 0) + qty;
+
+      await stock.save();
     }
 
     return res.status(200).json({
       success: true,
       message: "Sales Return Created Successfully",
-      data: newReturn
+      data: newReturn,
     });
 
   } catch (err) {
@@ -50,39 +85,34 @@ router.post("/sales-return", async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: err.message || "Server Error"
+      message: err.message || "Server Error",
     });
   }
 });
 
-
+/* GET ALL SALES RETURNS */
 router.get("/sales-return", async (req, res) => {
   try {
     const data = await SalesReturn.find()
-      .populate("customer_id", "first_name last_name company_name")
+      .populate({
+        path: "client_id",
+        select: "first_name last_name company_name gst state",
+      })
       .populate("sales_id", "invoice_no")
       .sort({ createdAt: -1 });
 
-    // 🔥 ADD FALLBACK FOR OLD DATA
-    const formatted = data.map((r, i) => ({
-      ...r._doc,
-      return_no: r.return_no || `SR-${(i + 1).toString().padStart(5, "0")}`,
-    }));
-
-    res.json({ success: true, data: formatted });
+    res.json({ success: true, data });
 
   } catch (err) {
     console.error("ERROR:", err);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-
+/* DELETE SALES RETURN */
 router.delete("/sales-return/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const deleted = await SalesReturn.findByIdAndDelete(id);
+    const deleted = await SalesReturn.findByIdAndDelete(req.params.id);
 
     if (!deleted) {
       return res.status(404).json({
@@ -91,7 +121,7 @@ router.delete("/sales-return/:id", async (req, res) => {
       });
     }
 
-    return res.json({
+    res.json({
       success: true,
       message: "Sales Return deleted successfully",
     });
@@ -99,6 +129,35 @@ router.delete("/sales-return/:id", async (req, res) => {
   } catch (err) {
     console.error("DELETE ERROR:", err);
     res.status(500).json({ success: false });
+  }
+});
+
+/* GET NEXT RETURN NUMBER */
+router.get("/sales-return/next-number", async (req, res) => {
+  try {
+    const last = await SalesReturn.findOne().sort({ createdAt: -1 });
+
+    let next = 1;
+
+    if (last && last.return_no) {
+      const parts = last.return_no.split("-");
+      const num = parseInt(parts[1]);
+      if (!isNaN(num)) next = num + 1;
+    }
+
+    const nextNumber = `SR-${String(next).padStart(5, "0")}`;
+
+    res.json({
+      success: true,
+      return_no: nextNumber, // ✅ FIXED KEY
+    });
+
+  } catch (err) {
+    console.error("NEXT SR ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 

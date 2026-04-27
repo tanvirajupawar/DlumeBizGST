@@ -119,7 +119,7 @@ function CustomerSelectorModal({ customers, onSelect, onClose, onCustomerCreated
 
 const filtered = customers.filter(c =>
   (`${c.first_name} ${c.last_name}` || "").toLowerCase().includes(search.toLowerCase()) ||
-  (c.gstin || "").toLowerCase().includes(search.toLowerCase()) ||
+  (c.gstin || c.gst || "").toLowerCase().includes(search.toLowerCase()) ||
   (c.city || "").toLowerCase().includes(search.toLowerCase())
 );
 
@@ -136,7 +136,7 @@ const filtered = customers.filter(c =>
     onSelect({
       id: c._id || c.id, _id: c._id,
    name: `${c.first_name} ${c.last_name}` || "", company_name: c.company_name || "",
-      business_type: c.business_type || "", gstin: c.gstin || "",
+      business_type: c.business_type || "", gstin: c.gstin || c.gst || "",
     phone: c.phone || "",
       address_line1: c.address_line_1 || "", address_line2: c.address_line_2 || "",
       city: c.city || "", state: c.state || "", state_code: c.state_code || "",
@@ -284,8 +284,7 @@ const filtered = customers.filter(c =>
                         {c.company_name ? <span style={{ fontWeight: 400, color: "#6b7280" }}> ({c.company_name})</span> : ""}
                       </div>
                       <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                     {c.gstin && <span>{c.gstin}</span>}
-
+                    {(c.gstin || c.gst) && <span>{c.gstin || c.gst}</span>}
                         {c.city         && <span>{c.city}{c.state ? ", " + c.state : ""}</span>}
                        {c.phone && <span>📞 {c.phone}</span>}
                       </div>
@@ -462,11 +461,40 @@ export default function SalesInvoice() {
   const fetchCities  = async (state) => {
     try { const r = await axios.get(`http://localhost:8000/api/cities/${state}`); if (r.data.success) setCities(r.data.data); } catch (e) { console.log(e); }
   };
- const fetchCustomers = async () => {
-  try { 
-    const r = await axios.get("http://localhost:8000/api/customers");  if (r.data.success) setCustomers(r.data.data); } catch (e) { console.log(e); }
-  };
+const fetchCustomers = async () => {
+  try {
+    const res = await axios.get("http://localhost:8000/api/customers");
 
+    if (res.data.success) {
+      const formatted = (res.data.data || []).map(c => ({
+        ...c,
+
+        // ✅ NORMALIZE NAME (important for UI)
+        first_name: c.first_name || "",
+        last_name: c.last_name || "",
+
+        // ✅ NORMALIZE GST (MAIN FIX)
+        gstin: c.gstin || c.gst || "",
+
+        // ✅ NORMALIZE PHONE
+        phone: c.phone || c.contact_no_1 || "",
+
+        // ✅ NORMALIZE ADDRESS
+        address_line_1: c.address_line_1 || "",
+        address_line_2: c.address_line_2 || "",
+
+        // ✅ OPTIONAL SAFE FIELDS
+        city: c.city || "",
+        state: c.state || "",
+        pincode: c.pincode || "",
+      }));
+
+      setCustomers(formatted);
+    }
+  } catch (err) {
+    console.error("Error fetching customers:", err);
+  }
+};
   useEffect(() => { fetchCustomers(); }, []);
 
   // Sales meta
@@ -706,8 +734,17 @@ const roundOff = grandTotal - beforeRound;
 
   const handleSaveSales = async () => {
     if (!customerForm.name.trim())  { alert("Customer Name is required");       return; }
-    if (!customerForm.state)        { alert("Customer State is required");      return; }
-    if (!customerForm.state_code)   { alert("Customer State Code is required"); return; }
+// ✅ Skip state validation for walk-in
+if (!selectedCustomer?.isWalkIn) {
+  if (!customerForm.state) {
+    alert("Customer State is required");
+    return;
+  }
+  if (!customerForm.state_code) {
+    alert("Customer State Code is required");
+    return;
+  }
+}
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       if (!it.name)                     { alert(`Item Name required in row ${i+1}`);   return; }
@@ -724,7 +761,16 @@ const roundOff = grandTotal - beforeRound;
       reverse_charge: reverseCharge,
       notes,
     client_id: selectedCustomer?._id || null,
-customer_name: customerForm.name || "Walk-in",
+customer_name: selectedCustomer?.isWalkIn
+  ? (customerForm.name?.trim() || "Walk-in")
+  : customerForm.name,
+  contact_no: selectedCustomer?.isWalkIn
+  ? (customerForm.phone || "")
+  : customerForm.phone,
+
+// ✅ ADD THIS
+state: selectedCustomer?.isWalkIn ? "" : customerForm.state,
+state_code: selectedCustomer?.isWalkIn ? "" : customerForm.state_code,
       details: items.map(it => ({
         product_name: it.name, product_id: it.product_id || null, item_type: it.itemType,
         sku: it.sku, hsn: it.hsn, unit: it.unit, qty: it.qty,

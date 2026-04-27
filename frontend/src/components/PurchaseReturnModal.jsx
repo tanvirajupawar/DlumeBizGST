@@ -37,9 +37,12 @@ const PurchaseReturnModal = ({ invoice, onClose, onConfirm }) => {
     `PR-${invoice.invoiceNo}-${Date.now().toString().slice(-4)}`
   );
 
-  const [returnItems, setReturnItems] = useState(
-    invoice.items.map((item) => ({ ...item, returnQty: item.qty }))
-  );
+const [returnItems, setReturnItems] = useState(
+  (invoice?.items || []).map((item) => ({
+    ...item,
+    returnQty: item.qty
+  }))
+);
 
   const handleQtyChange = (index, value) => {
     const parsed = Math.max(0, Math.min(Number(value), returnItems[index].qty));

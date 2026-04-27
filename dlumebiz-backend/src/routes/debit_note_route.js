@@ -43,16 +43,16 @@ router.post("/debit-note", async (req, res) => {
 
 router.get("/debit-note", async (req, res) => {
   try {
-    const notes = await DebitNote.find()
-      .populate({
-        path: "vendor_id",
-        select: "vendor_name company_name"
-      })
-      .populate({
-        path: "purchase_id",
-        select: "supplier_invoice_no"
-      })
-      .lean(); // ✅ correct position
+const notes = await DebitNote.find()
+  .populate({
+    path: "vendor_id",
+    select: "vendor_name company_name gst gstin gst_no gst_number state_code"
+  })
+  .populate({
+    path: "purchase_id",
+    select: "supplier_invoice_no taxable_amount total_amount vendor_id"
+  })
+  .lean();
 
     console.log("DEBIT NOTES:", notes); // 🔍 debug
 

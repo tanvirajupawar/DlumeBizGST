@@ -1,17 +1,21 @@
 const StatusBadge = ({ status }) => {
-  const styles = {
-    Paid: "bg-green-100 text-green-700",
-    Unpaid: "bg-red-100 text-red-700",
-    Pending: "bg-yellow-100 text-yellow-700",
-  };
+  let style = "";
+  let label = "";
+
+  if (status === "Paid") {
+    style = "bg-green-50 text-green-700";
+    label = "Paid";
+  } else if (status === "Partial") {
+    style = "bg-blue-50 text-blue-700";
+    label = "Partial";
+  } else {
+    style = "bg-red-50 text-red-600";
+    label = "Unpaid";
+  }
 
   return (
-    <span
-      className={`px-3 py-1 text-xs font-medium rounded-full ${
-        styles[status] || "bg-gray-100 text-gray-600"
-      }`}
-    >
-      {status}
+    <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${style}`}>
+      {label}
     </span>
   );
 };

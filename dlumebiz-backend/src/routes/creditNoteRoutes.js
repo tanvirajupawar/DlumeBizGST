@@ -11,8 +11,20 @@ router.post("/credit-note", async (req, res) => {
 
     console.log("📦 CREDIT DATA:", data);
 
-    const newNote = new CreditNote(data);
-    await newNote.save();
+// 🔥 GENERATE CREDIT NOTE NUMBER
+const last = await CreditNote.findOne().sort({ createdAt: -1 });
+
+let next = 1;
+
+if (last && last.credit_no) {
+  next = parseInt(last.credit_no.split("-")[1]) + 1;
+}
+
+data.credit_no = `CN-${String(next).padStart(5, "0")}`;
+
+// ✅ SAVE
+const newNote = new CreditNote(data);
+await newNote.save();
 
     return res.json({
       success: true,
@@ -33,12 +45,19 @@ router.post("/credit-note", async (req, res) => {
 /* GET CREDIT NOTES */
 router.get("/credit-note", async (req, res) => {
   try {
-    const data = await CreditNote.find()
-      .populate("customer_id", "first_name last_name company_name")
-      .populate("sales_id", "invoice_no")
-      .sort({ createdAt: -1 });
+  const data = await CreditNote.find()
+  .populate({
+    path: "client_id",
+    select: "first_name last_name company_name gst state"
+  })
+  .populate("sales_id", "invoice_no");
 
-    res.json({ success: true, data });
+    const formatted = data.map((n) => ({
+      ...n._doc,
+      client_id: n.client_id || n.customer_id, // 🔥 fix
+    }));
+
+    res.json({ success: true, data: formatted });
 
   } catch (err) {
     console.error(err);
@@ -56,6 +75,32 @@ router.delete("/credit-note/:id", async (req, res) => {
 
   } catch (err) {
     res.status(500).json({ success: false });
+  }
+});
+
+router.get("/credit-note/next-number", async (req, res) => {
+  try {
+    const last = await CreditNote.findOne().sort({ createdAt: -1 });
+
+    let next = 1;
+
+    if (last && last.credit_no) {
+      next = parseInt(last.credit_no.split("-")[1]) + 1;
+    }
+
+    const nextNumber = `CN-${String(next).padStart(5, "0")}`;
+
+    res.json({
+      success: true,
+      number: nextNumber,
+    });
+
+  } catch (err) {
+    console.error("NEXT CN ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 

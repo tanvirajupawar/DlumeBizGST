@@ -125,17 +125,7 @@ const res = await axios.get(
           {/* Push filters to the right */}
           <div className="flex-1" />
 
-          {/* Search Category */}
-          <div className="relative">
-            <FiSearch size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search Category"
-              value={searchCategory}
-              onChange={(e) => setSearchCategory(e.target.value)}
-              className="pl-9 pr-4 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-600 bg-white focus:outline-none focus:border-indigo-300 w-48"
-            />
-          </div>
+   
 
       
         </div>

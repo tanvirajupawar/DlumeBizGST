@@ -1,6 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { FiTrash2 } from "react-icons/fi";
 import Modal from "./Modal";
+import axios from "axios";
+
 
 const fmt = (n) => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 });
 
@@ -33,9 +35,23 @@ const fmt = (n) => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDi
  *  )}
  */
 const SalesReturnModal = ({ invoice, onClose, onConfirm }) => {
-  const returnNumber = useRef(
-    `SR-${invoice.invoiceNo}-${Date.now().toString().slice(-4)}`
-  );
+const [returnNumber, setReturnNumber] = useState("");
+
+useEffect(() => {
+  const fetchReturnNumber = async () => {
+    try {
+      const res = await axios.get("http://localhost:8000/api/sales-return/next-number");
+
+      if (res.data.success) {
+        setReturnNumber(res.data.number);
+      }
+    } catch (err) {
+      console.error("SR NUMBER ERROR:", err);
+    }
+  };
+
+  fetchReturnNumber();
+}, []);
 
   const [returnItems, setReturnItems] = useState(
     invoice.items.map((item) => ({ ...item, returnQty: item.qty }))
@@ -62,9 +78,14 @@ const SalesReturnModal = ({ invoice, onClose, onConfirm }) => {
 
       {/* Header meta row */}
       <div className="flex items-start justify-between -mt-3 gap-4">
-       <p className="text-xs text-gray-400">
-  {invoice.customerName || "Walk-in"} &nbsp;·&nbsp; {invoice.date}
-</p>
+     <div className="flex flex-col">
+  <p className="text-sm font-semibold text-gray-800">
+    {invoice.customerName || "Walk-in"}
+  </p>
+  <p className="text-xs text-gray-400">
+    {invoice.date}
+  </p>
+</div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
@@ -79,7 +100,7 @@ const SalesReturnModal = ({ invoice, onClose, onConfirm }) => {
               Return No
             </p>
             <p className="text-xs font-bold text-green-800 font-mono">
-              {returnNumber.current}
+            {returnNumber || "Loading..."}
             </p>
           </div>
         </div>
@@ -157,12 +178,12 @@ const SalesReturnModal = ({ invoice, onClose, onConfirm }) => {
           <button
             disabled={returnItems.length === 0 || returnTotal === 0}
             onClick={() =>
-              onConfirm({
-                items: returnItems,
-                total: returnTotal,
-                date: new Date().toISOString(),
-                reason: ""
-              })
+onConfirm({
+  items: returnItems,
+  total: returnTotal,
+  date: new Date().toISOString(),
+  reason: ""
+})
             }
             className="px-5 py-2 text-sm bg-green-700 text-white rounded-lg font-medium hover:bg-green-800 disabled:opacity-40 disabled:cursor-not-allowed transition"
           >

@@ -18,6 +18,8 @@ async function generateInvoiceNo(company_id, invoice_type) {
 const saleOrderSchema = new Schema({
   company_id: { type: Types.ObjectId, ref: "Company" },
   client_id: { type: Types.ObjectId, ref: "Client" },
+  customer_name: { type: String, default: "" },
+contact_no: { type: String, default: "" },
   order_date: { type: Date, default: Date.now },
   shipment_date: { type: Date, default: Date.now },
   invoice_date: { type: Date },   

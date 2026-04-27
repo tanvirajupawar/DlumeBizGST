@@ -87,6 +87,34 @@ const MainLayout = () => {
   const [openMenu, setOpenMenu] = useState(null);
   const [openSubMenu, setOpenSubMenu] = useState(null);
 
+
+  // 🔥 ADD HERE
+const downloadCSV = () => {
+  const table = document.querySelector("table");
+  if (!table) return alert("No data to export");
+
+  let csv = [];
+  for (let row of table.rows) {
+    let cols = Array.from(row.cells).map(cell => cell.innerText);
+    csv.push(cols.join(","));
+  }
+
+  const blob = new Blob([csv.join("\n")], { type: "text/csv" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "stock-summary.csv";
+  link.click();
+};
+
+const handlePrint = () => {
+  window.print();
+};
+
+const handleEmail = () => {
+  window.location.href =
+    "mailto:?subject=Stock Report&body=Please find attached stock report.";
+};
+
   const isRouteActive = (path) => {
     return (
       location.pathname === path ||
@@ -181,6 +209,29 @@ const MainLayout = () => {
         </div>
       ),
     },
+
+    "/reports/gstr1-sales": {
+  title: "Sales Reports",
+  subtitle: "View GST sales report details.",
+  actions: (
+    <div className="flex gap-3">
+      <button className="top-btn">
+        <HiOutlineMail size={16} /> Email Excel
+      </button>
+
+      <button
+        onClick={() => window.exportGSTR1Excel?.()}
+        className="top-btn"
+      >
+        <HiOutlineDownload size={16} /> Download Excel
+      </button>
+
+      <button className="top-btn">
+        <HiOutlinePrinter size={16} /> Print PDF
+      </button>
+    </div>
+  ),
+},
 
     "/reports/purchase-summary": {
   title: "Purchase Summary",
@@ -374,15 +425,17 @@ const MainLayout = () => {
   {/* ✅ STOCK SUMMARY PAGE */}
   {location.pathname === "/stock-summary" ? (
     <div className="flex gap-3">
-      <button className="top-btn">
-        <HiOutlineMail size={16} /> Email Excel
-      </button>
-      <button className="top-btn">
-        <HiOutlineDownload size={16} /> Download Excel
-      </button>
-      <button className="top-btn">
-        <HiOutlinePrinter size={16} /> Print PDF
-      </button>
+     <button onClick={handleEmail} className="top-btn">
+  <HiOutlineMail size={16} /> Email Excel
+</button>
+
+<button onClick={downloadCSV} className="top-btn">
+  <HiOutlineDownload size={16} /> Download Excel
+</button>
+
+<button onClick={handlePrint} className="top-btn">
+  <HiOutlinePrinter size={16} /> Print PDF
+</button>
     </div>
 
   /* ✅ ITEMS PAGE */

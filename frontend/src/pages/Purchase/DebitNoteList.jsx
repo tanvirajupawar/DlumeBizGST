@@ -66,10 +66,8 @@ const DebitNoteList = () => {
   const formatted = res.data.data.map((n) => ({
   id: n._id,
   debitNo: n.debit_no,
-  partyName:
-    n.vendor_id?.vendor_name ||
-    n.vendor_id?.company_name ||
-    "Unknown Vendor",
+companyName: n.vendor_id?.company_name || "",
+customerName: n.vendor_id?.vendor_name || "",
   invoiceNo: n.purchase_id?.supplier_invoice_no || "-",
   date: new Date(n.date).toLocaleDateString("en-GB"),
   amount: n.amount || 0,
@@ -107,7 +105,8 @@ const DebitNoteList = () => {
   };
 
   const filteredNotes = notes.filter((n) =>
-    (n.partyName || "").toLowerCase().includes(search.toLowerCase()) ||
+(n.companyName || "").toLowerCase().includes(search.toLowerCase()) ||
+(n.customerName || "").toLowerCase().includes(search.toLowerCase()) ||
     (n.debitNo || "").toLowerCase().includes(search.toLowerCase()) ||
     (n.invoiceNo || "").toLowerCase().includes(search.toLowerCase())
   );
@@ -157,10 +156,12 @@ const DebitNoteList = () => {
         </div>
 
         {/* Column Headers */}
-        <div className="grid grid-cols-[130px_1fr_1fr_150px_130px_60px] border-b border-gray-200 bg-gray-50 px-6">
+        <div className="grid grid-cols-[130px_1fr_1fr_1fr_150px_130px_60px] border-b border-gray-200 bg-gray-50 px-6">
           <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</div>
           <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Debit Note No</div>
-          <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Party Name</div>
+          <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Company Name</div>
+          <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer Name</div>
+
           <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice No</div>
           <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right pr-6">Amount</div>
           <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">Actions</div>
@@ -181,7 +182,7 @@ const DebitNoteList = () => {
               className={!isLast ? "border-b border-gray-100" : ""}
             >
               <div
-                className={`grid grid-cols-[130px_1fr_1fr_150px_130px_60px] px-6 items-center transition-colors cursor-pointer
+                className={`grid grid-cols-[130px_1fr_1fr_1fr_150px_130px_60px] px-6 items-center transition-colors cursor-pointer
                   ${isSelected ? "bg-blue-50/60" : "hover:bg-gray-50"}`}
                 onClick={() => setSelectedNote(note)}
               >
@@ -192,8 +193,16 @@ const DebitNoteList = () => {
                   <p className="text-sm font-mono text-gray-500">{note.debitNo}</p>
                 </div>
                 <div className="py-4 pr-4">
-                  <p className="text-sm font-medium text-gray-800 truncate">{note.partyName}</p>
-                </div>
+  <p className="text-sm font-medium text-gray-800 truncate">
+    {note.companyName || "—"}
+  </p>
+</div>
+
+<div className="py-4 pr-4">
+  <p className="text-sm text-gray-600 truncate">
+    {note.customerName || "—"}
+  </p>
+</div>
                 <div className="py-4">
                   <p className="text-sm font-mono text-gray-500">{note.invoiceNo}</p>
                 </div>

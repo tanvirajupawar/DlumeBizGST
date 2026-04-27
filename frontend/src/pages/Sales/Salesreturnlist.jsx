@@ -6,40 +6,13 @@ import { HiOutlineCalendar } from "react-icons/hi";
 import Button from "../../components/Button";
 import Table from "../../components/Table";
 import SalesReturnDetailPanel from "../../components/SalesReturnDetailPanel";
+import DateFilter, { applyDateFilter } from "../../components/DateFilter";
 
 const fmt = (n) =>
   "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 0 });
 
-const DATE_FILTERS = ["Last 30 Days", "Last 90 Days", "Last 365 Days", "All Time"];
 
-/* ─── Date Filter ─── */
-const DateFilter = ({ selected, onChange }) => {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 bg-white"
-      >
-        <HiOutlineCalendar size={15} className="text-gray-400" />
-        {selected}
-      </button>
-      {open && (
-        <div className="absolute top-10 bg-white border rounded shadow w-40 z-20">
-          {DATE_FILTERS.map((f) => (
-            <button
-              key={f}
-              onClick={() => { onChange(f); setOpen(false); }}
-              className="block w-full px-3 py-2 text-sm hover:bg-gray-50"
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+
 
 /* ─── PRINT TEMPLATE ─── */
 export const getPrintHTML = (note) => `
@@ -146,12 +119,10 @@ const SalesReturnList = () => {
         const formatted = res.data.data.map((r) => ({
           id: r._id,
           returnNo: r.return_no,
-        partyName: r.customer_id
-  ? `${r.customer_id.first_name || ""} ${r.customer_id.last_name || ""}`.trim() ||
-    r.customer_id.company_name
-  : "Walk-in",
+   companyName: r.client_id?.company_name || "",
+customerName: `${r.client_id?.first_name || ""} ${r.client_id?.last_name || ""}`.trim(),
          invoiceNo: r.sales_id?.invoice_no || "-",
-          date: new Date(r.date).toLocaleDateString("en-GB"),
+        date: r.date,
           amount: r.total_amount || 0,
 
           subTotal: r.sub_total,
@@ -178,6 +149,8 @@ const SalesReturnList = () => {
 
   const totalAmount = returns.reduce((s, r) => s + r.amount, 0);
 
+  const filteredReturns = applyDateFilter(returns, "date", dateFilter);
+
   const handleDelete = async (id) => {
     const confirmDelete = window.confirm(
       "Are you sure you want to delete this return?"
@@ -195,54 +168,82 @@ const SalesReturnList = () => {
   };
 
   const columns = [
-    { key: "date", label: "Date" },
-    {
-      key: "returnNo",
-      label: "Sales Return No",
-      render: (v) => <span className="font-mono">{v}</span>,
-    },
-    { key: "partyName", label: "Party Name" },
-    { key: "invoiceNo", label: "Invoice No" },
-    {
-      key: "amount",
-      label: "Amount",
-      render: (v) => <span className="font-semibold">{fmt(v)}</span>,
-    },
-    {
-      key: "id",
-      label: "Actions",
-      render: (_, row) => (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            handleDelete(row.id);
-          }}
-          className="p-1.5 rounded-md text-red-400 hover:text-red-600 hover:bg-red-100 transition"
-        >
-          <FiTrash2 size={14} />
-        </button>
-      ),
-    },
-  ];
+  {
+  key: "date",
+  label: "Date",
+  render: (v) =>
+  new Date(v).toLocaleDateString("en-GB").replace(/\//g, "-"),
+},
+  {
+    key: "returnNo",
+    label: "Sales Return No",
+    render: (v) => <span className="font-mono">{v}</span>,
+  },
+
+  {
+    key: "companyName",
+    label: "Company Name",
+    render: (v) => v || "—",
+  },
+
+  {
+    key: "customerName",
+    label: "Customer Name",
+    render: (v) => v || "—",
+  },
+
+  { key: "invoiceNo", label: "Invoice No" },
+
+  {
+    key: "amount",
+    label: "Amount",
+    render: (v) => <span className="font-semibold">{fmt(v)}</span>,
+  },
+
+  {
+    key: "id",
+    label: "Actions",
+    render: (_, row) => (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          handleDelete(row.id);
+        }}
+        className="p-1.5 rounded-md text-red-400 hover:text-red-600 hover:bg-red-100 transition"
+      >
+        <FiTrash2 size={14} />
+      </button>
+    ),
+  },
+];
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <DateFilter selected={dateFilter} onChange={setDateFilter} />
-        <div className="ml-auto bg-green-50 px-4 py-2 rounded">
-          <p className="text-xs text-gray-400">Total Returns</p>
-          <p className="text-sm font-bold text-green-600">{fmt(totalAmount)}</p>
-        </div>
-      </div>
+    <div className="space-y-5 relative z-10">
+ <div className="flex items-center gap-3">
+  
+<div className="bg-green-50 px-4 py-2 rounded flex items-center gap-2">
+  <span className="text-xs text-gray-400">Total Returns:</span>
+  <span className="text-sm font-bold text-green-600">{fmt(totalAmount)}</span>
+</div>
+
+  <div className="ml-auto">
+    <DateFilter value={dateFilter} onChange={setDateFilter} />
+  </div>
+
+</div>
 
       <Table
         columns={columns}
-        data={returns}
+        data={filteredReturns}
         onRowClick={(row) => setSelectedReturn(row)}
         headerActions={
-          <Button onClick={() => navigate("/sales-return/new")}>
-            <FiPlus size={14} /> Create Sales Return
-          </Button>
+    <Button
+  onClick={() => navigate("/sales-return/new")}
+  className="flex items-center gap-2"
+>
+  <FiPlus size={14} />
+  Create Sales Return
+</Button>
         }
       />
 

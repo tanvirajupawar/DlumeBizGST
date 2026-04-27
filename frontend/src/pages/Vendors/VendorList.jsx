@@ -54,27 +54,58 @@ const VendorList = () => {
     }
   };
 
-  const handleSavePayment = () => {
-    const today = new Date().toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
+const handleSavePayment = async () => {
+  try {
+    const payload = {
+     vendor_id: selectedVendor.id || selectedVendor._id,
+      amount: Number(paymentAmount),
+      payment_mode: paymentMode,
+      remark: remark || ""
+    };
 
-    setSavedPayment({
-      amount: paymentAmount,
-      method: paymentMode,
-      date: today,
-      customer: {
-        first_name: selectedVendor?.name || "",
-        last_name: "",
-        contact_no_1: selectedVendor?.phone || "",
-      },
-    });
+    console.log("💰 PAYMENT PAYLOAD:", payload);
 
-    setShowPayModal(false);
-    setShowSuccess(true);
-  };
+    const res = await axios.post(
+      "http://localhost:8000/api/payment-out",
+      payload
+    );
+
+if (res.data.success) {
+  const today = new Date().toLocaleDateString("en-GB");
+
+  setSavedPayment({
+    amount: paymentAmount,
+    method: paymentMode,
+    date: today,
+    customer: {
+      first_name: selectedVendor?.name || "",
+      contact_no_1: selectedVendor?.phone || "",
+    },
+  });
+
+  // ✅ refresh vendor list
+  fetchVendors();
+
+  // 🔥 ADD THIS LINE (VERY IMPORTANT)
+  window.dispatchEvent(new Event("paymentUpdated"));
+
+  // ✅ close modal
+  setShowPayModal(false);
+
+  // ✅ show success screen
+  setShowSuccess(true);
+
+  setPaymentAmount("");
+  setRemark("");
+}
+
+  } catch (err) {
+    console.error("PAYMENT ERROR:", err);
+    alert("Payment Failed");
+  }
+};
+
+
 
   const handleSuccessDone = () => {
     setShowSuccess(false);

@@ -4,13 +4,13 @@ const salesReturnSchema = new mongoose.Schema(
   {
     sales_id: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "SaleOrder", // ✅ FIXED (was "Sales")
+      ref: "SaleOrder",
       required: true,
     },
 
-    customer_id: {
+    client_id: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Client", // ✅ FIXED (was "Customer")
+      ref: "Client",
       required: true,
     },
 
@@ -26,21 +26,34 @@ const salesReturnSchema = new mongoose.Schema(
 
     details: [
       {
+        // ✅ ADD THIS (CRITICAL FIX)
+        product_id: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product", // optional but good
+          required: false,
+        },
+
         product_name: {
           type: String,
           required: true,
         },
+
         qty: {
           type: Number,
           required: true,
+          min: 1, // ✅ prevents 0 or negative
         },
+
         price: {
           type: Number,
           required: true,
+          min: 0,
         },
+
         amount: {
           type: Number,
           required: true,
+          min: 0,
         },
       },
     ],
@@ -48,6 +61,7 @@ const salesReturnSchema = new mongoose.Schema(
     total_amount: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     reason: {
@@ -58,18 +72,25 @@ const salesReturnSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-
-// 🔥 AUTO GENERATE RETURN NUMBER
+// 🔥 AUTO GENERATE RETURN NUMBER (SAFE VERSION)
 salesReturnSchema.pre("save", async function (next) {
   if (!this.return_no) {
-    const count = await mongoose.models.SalesReturn.countDocuments();
-    this.return_no = `SR-${(count + 1).toString().padStart(5, "0")}`;
+    const last = await mongoose.models.SalesReturn
+      .findOne()
+      .sort({ createdAt: -1 });
+
+    let next = 1;
+
+    if (last && last.return_no) {
+      next = parseInt(last.return_no.split("-")[1]) + 1;
+    }
+
+    this.return_no = `SR-${String(next).padStart(5, "0")}`;
   }
   next();
 });
 
-
-// 🔥 CRITICAL FIX (prevents overwrite error)
+// 🔥 MODEL EXPORT SAFE
 const SalesReturn =
   mongoose.models.SalesReturn ||
   mongoose.model("SalesReturn", salesReturnSchema);

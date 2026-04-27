@@ -2,12 +2,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import InvoiceDetailPanel from "../../components/InvoiceDetailPanel";
-import PurchaseReturnModal from "../../components/Purchasereturnmodal";
-import DebitNoteModal from "../../components/DebitNoteModal";
+import SalesReturnModal from "../../components/SalesReturnModal";
+import CreditNoteModal from "../../components/CreditNoteModal";
 import ActionMenu from "../../components/ActionMenu";
 import PaymentSuccessScreen from "../Payment/PaymentSuccessScreen";
-
-
 
 const FILTERS = [
   "Today","Yesterday","This Week","Last Week","Last 7 Days",
@@ -54,6 +52,12 @@ const getDateRange = (filter) => {
   }
   return `${format(from)} to ${format(to)}`;
 };
+
+// ── helper: get balance for a row ─────────────────────────────────────────────
+const getBalance = (r) =>
+  r.balance_amount !== undefined && r.balance_amount !== null
+    ? Number(r.balance_amount)
+    : Number(r.total_amount || 0);
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const DateFilter = ({ showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) => (
@@ -153,40 +157,34 @@ const shareLink = () => {
   else prompt("Copy this link:", url);
 };
 
-// ── helper: get balance for a row ─────────────────────────────────────────────
-const getBalance = (r) =>
-  r.balance_amount !== undefined && r.balance_amount !== null
-    ? Number(r.balance_amount)
-    : Number(r.total_amount || 0);
+// ── Receive Modal ─────────────────────────────────────────────────────────────
+function ReceiveModal({ invoices, customerId, onClose, onSuccess }) {
+  const totalDue  = invoices.reduce((s, r) => s + getBalance(r), 0);
+  const [amount, setAmount] = useState(totalDue);
+  const [mode, setMode]     = useState("Cash");
+  const [remark, setRemark] = useState("");
+  const [saving, setSaving] = useState(false);
 
-// ── Pay Modal ─────────────────────────────────────────────────────────────────
-function PayModal({ invoices, vendorId, onClose, onSuccess }) {
-  const totalDue   = invoices.reduce((s, r) => s + getBalance(r), 0);
-  const [amount, setAmount]   = useState(totalDue);
-  const [mode, setMode]       = useState("Cash");
-  const [remark, setRemark]   = useState("");
-  const [saving, setSaving]   = useState(false);
-
-  const handlePay = async () => {
+  const handleReceive = async () => {
     if (!amount || Number(amount) <= 0) { alert("Enter a valid amount"); return; }
     setSaving(true);
     try {
-      const res =await axios.post("http://localhost:8000/api/payment-out", {
-  vendor_id: vendorId,
-  amount: Number(amount),
-  payment_mode: mode,
-  remark,
-  invoice_ids: invoices.map(inv => inv._id), 
-});
+      const res = await axios.post("http://localhost:8000/api/payment-in", {
+        customer_id: customerId,
+        amount: Number(amount),
+        payment_mode: mode,
+        remark,
+        invoice_ids: invoices.map(inv => inv._id),
+      });
       if (res.data.success) {
         window.dispatchEvent(new Event("paymentUpdated"));
-       onSuccess(res.data.data); // 🔥 pass payment data
+        onSuccess(res.data.data);
       } else {
-        alert("Payment failed");
+        alert("Payment collection failed");
       }
     } catch (err) {
       console.error(err);
-      alert("Payment failed");
+      alert("Payment collection failed");
     } finally {
       setSaving(false);
     }
@@ -195,13 +193,13 @@ function PayModal({ invoices, vendorId, onClose, onSuccess }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-[440px] p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <h2 className="text-[15px] font-semibold text-gray-800">Pay Selected Invoices</h2>
+        <h2 className="text-[15px] font-semibold text-gray-800">Receive Payment for Selected Invoices</h2>
 
         {/* Invoice breakdown */}
         <div className="border border-gray-100 rounded-xl overflow-hidden text-[12px]">
           {invoices.map((inv, i) => (
             <div key={i} className="flex justify-between px-4 py-2.5 border-b border-gray-100 last:border-0">
-              <span className="font-mono text-gray-600">{inv.supplier_invoice_no || "—"}</span>
+              <span className="font-mono text-gray-600">{inv.invoice_no || inv.sales_invoice_no || "—"}</span>
               <span className="font-semibold text-gray-800">{fmt(getBalance(inv))}</span>
             </div>
           ))}
@@ -213,7 +211,7 @@ function PayModal({ invoices, vendorId, onClose, onSuccess }) {
 
         {/* Amount */}
         <div>
-          <label className="text-[12px] text-gray-500 mb-1 block">Amount to Pay</label>
+          <label className="text-[12px] text-gray-500 mb-1 block">Amount to Receive</label>
           <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
             <span className="px-3 py-2 bg-gray-50 text-sm text-gray-500 border-r border-gray-200">₹</span>
             <input
@@ -251,9 +249,9 @@ function PayModal({ invoices, vendorId, onClose, onSuccess }) {
             className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">
             Cancel
           </button>
-          <button onClick={handlePay} disabled={saving}
+          <button onClick={handleReceive} disabled={saving}
             className="flex-1 py-2 bg-[#1e3a8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50">
-            {saving ? "Saving..." : "Confirm Payment"}
+            {saving ? "Saving..." : "Confirm Receipt"}
           </button>
         </div>
       </div>
@@ -262,26 +260,26 @@ function PayModal({ invoices, vendorId, onClose, onSuccess }) {
 }
 
 // ── Tab: Transactions ─────────────────────────────────────────────────────────
-function TransactionsTab({ vendorId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+function TransactionsTab({ customerId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
   const [invoices, setInvoices]               = useState([]);
   const [loading, setLoading]                 = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [showSuccess, setShowSuccess] = useState(false);
-const [paymentData, setPaymentData] = useState(null);
-  const [purchaseReturnTarget, setPurchaseReturnTarget] = useState(null);
-  const [debitNoteTarget, setDebitNoteTarget] = useState(null);
+  const [showSuccess, setShowSuccess]         = useState(false);
+  const [paymentData, setPaymentData]         = useState(null);
+  const [salesReturnTarget, setSalesReturnTarget] = useState(null);
+  const [creditNoteTarget, setCreditNoteTarget]   = useState(null);
   const [selected, setSelected]               = useState([]);
-  const [showPayModal, setShowPayModal]        = useState(false);
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
 
   const fetchInvoices = async () => {
-    if (!vendorId) return;
+    if (!customerId) return;
     try {
-      const res = await axios.get(`http://localhost:8000/api/purchase?vendor_id=${vendorId}`);
+      const res = await axios.get(`http://localhost:8000/api/sales?customer_id=${customerId}`);
       if (res.data.success) setInvoices(res.data.data);
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { setLoading(true); fetchInvoices().finally(() => setLoading(false)); }, [vendorId]);
+  useEffect(() => { setLoading(true); fetchInvoices().finally(() => setLoading(false)); }, [customerId]);
 
   useEffect(() => {
     const handle = () => { setLoading(true); fetchInvoices().finally(() => setLoading(false)); };
@@ -295,24 +293,23 @@ const [paymentData, setPaymentData] = useState(null);
     setSelected(selected.length === unpaidIds.length ? [] : unpaidIds);
   };
 
-  // selected invoice objects (for PayModal)
   const selectedInvoices = invoices.filter(r => selected.includes(r._id));
 
   const handleDownload = () => {
     downloadCSV("invoices.csv",
       ["Date", "Invoice No", "Amount", "Balance", "Status"],
-      invoices.map(r => [fmtDate(r.invoice_date), r.supplier_invoice_no || "—", r.total_amount || 0, r.balance_amount || 0, r.payment_status || "—"])
+      invoices.map(r => [fmtDate(r.invoice_date), r.invoice_no || r.sales_invoice_no || "—", r.total_amount || 0, r.balance_amount || 0, r.payment_status || "—"])
     );
   };
 
   const handlePrint = () => {
     const tableHTML = `<table><thead><tr><th>Date</th><th>Invoice No</th><th>Amount</th><th>Balance</th><th>Status</th></tr></thead><tbody>
-      ${invoices.map(r => `<tr><td>${fmtDate(r.invoice_date)}</td><td>${r.supplier_invoice_no || "—"}</td>
+      ${invoices.map(r => `<tr><td>${fmtDate(r.invoice_date)}</td><td>${r.invoice_no || r.sales_invoice_no || "—"}</td>
         <td>₹${Number(r.total_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
         <td>${r.balance_amount > 0 ? "₹" + Number(r.balance_amount).toLocaleString("en-IN", { minimumFractionDigits: 2 }) : "—"}</td>
         <td>${r.payment_status || "—"}</td></tr>`).join("")}
     </tbody></table>`;
-    openPrintWindow("Invoices", tableHTML);
+    openPrintWindow("Sales Invoices", tableHTML);
   };
 
   const cols = [
@@ -334,7 +331,7 @@ const [paymentData, setPaymentData] = useState(null);
       },
     },
     { key: "invoice_date", label: "Date", sortable: true, render: r => fmtDate(r.invoice_date) },
-    { key: "supplier_invoice_no", label: "Invoice No" },
+    { key: "invoice_no",   label: "Invoice No", render: r => r.invoice_no || r.sales_invoice_no || "—" },
     {
       key: "total_amount", label: "Amount",
       render: r => (
@@ -367,15 +364,19 @@ const [paymentData, setPaymentData] = useState(null);
       render: r => (
         <ActionMenu invoice={r}
           onEdit={() => console.log("Edit", r)}
-          onPurchaseReturn={() => setPurchaseReturnTarget({
+          onSalesReturn={() => setSalesReturnTarget({
             ...r,
             items: (r.details || []).map(d => ({ item: d.product_name, qty: d.qty, price: d.price, product_id: d.product_id })),
-            invoiceNo: r.supplier_invoice_no, vendor: r.vendor_id?.company_name || "—", date: r.invoice_date,
+            invoiceNo: r.invoice_no || r.sales_invoice_no,
+            customer: r.customer_id?.customer_name || r.customer_id?.first_name || "—",
+            date: r.invoice_date,
           })}
-          onDebitNote={() => setDebitNoteTarget({
+          onCreditNote={() => setCreditNoteTarget({
             ...r,
             items: (r.details || []).map(d => ({ item: d.product_name, qty: d.qty, price: d.price, product_id: d.product_id })),
-            invoiceNo: r.supplier_invoice_no, vendor: r.vendor_id?.company_name || "—", date: r.invoice_date,
+            invoiceNo: r.invoice_no || r.sales_invoice_no,
+            customer: r.customer_id?.customer_name || r.customer_id?.first_name || "—",
+            date: r.invoice_date,
           })}
           onDelete={() => console.log("Delete", r)}
         />
@@ -383,23 +384,22 @@ const [paymentData, setPaymentData] = useState(null);
     },
   ];
 
-if (showSuccess) {
-  return (
-    <PaymentSuccessScreen
-      amount={paymentData?.amount}
-      method={paymentData?.method}
-      date={paymentData?.date}
-      customer={paymentData?.customer}
-      onDone={() => {
-        setShowSuccess(false);
-        setSelected([]);
-        setLoading(true);
-        fetchInvoices().finally(() => setLoading(false));
-      }}
-    />
-  );
-}
-
+  if (showSuccess) {
+    return (
+      <PaymentSuccessScreen
+        amount={paymentData?.amount}
+        method={paymentData?.method}
+        date={paymentData?.date}
+        customer={paymentData?.customer}
+        onDone={() => {
+          setShowSuccess(false);
+          setSelected([]);
+          setLoading(true);
+          fetchInvoices().finally(() => setLoading(false));
+        }}
+      />
+    );
+  }
 
   return (
     <>
@@ -412,13 +412,13 @@ if (showSuccess) {
           <Ico.Share /> Share <Ico.Chevron />
         </button>
 
-        {/* ✅ Pay button — opens PayModal */}
+        {/* ✅ Receive button — opens ReceiveModal */}
         <button
           disabled={selected.length === 0}
-          onClick={() => setShowPayModal(true)}
+          onClick={() => setShowReceiveModal(true)}
           className={`px-4 py-[7px] text-[13px] font-medium rounded-md transition
             ${selected.length === 0 ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700"}`}>
-          Pay ({selected.length})
+          Receive ({selected.length})
         </button>
       </div>
 
@@ -427,10 +427,10 @@ if (showSuccess) {
         : <TableView cols={cols} rows={invoices} onRowClick={(row) => {
             setSelectedInvoice({
               ...row,
-              invoiceNo: row.supplier_invoice_no,
+              invoiceNo: row.invoice_no || row.sales_invoice_no,
               amount: row.total_amount,
               items: (row.details || []).map(d => ({ item: d.product_name, qty: d.qty, price: d.price, total: d.amount })),
-              vendor: row.vendor_id?.company_name || "—",
+              customer: row.customer_id?.customer_name || row.customer_id?.first_name || "—",
               date: new Date(row.invoice_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
             });
           }} />
@@ -438,55 +438,71 @@ if (showSuccess) {
 
       {selectedInvoice && <InvoiceDetailPanel invoice={selectedInvoice} onClose={() => setSelectedInvoice(null)} />}
 
-      {/* ✅ Pay Modal */}
-      {showPayModal && (
-        <PayModal
+      {/* ✅ Receive Modal */}
+      {showReceiveModal && (
+        <ReceiveModal
           invoices={selectedInvoices}
-          vendorId={vendorId}
-          onClose={() => setShowPayModal(false)}
-         onSuccess={(data) => {
-  setShowPayModal(false);
-
-  setPaymentData({
-    amount: data.amount,
-    method: data.payment_mode,
-    date: new Date().toLocaleDateString("en-GB"),
- customer: {
-  first_name: "Vendor",
-  contact_no_1: "",
-},
-  });
-
-  setShowSuccess(true);
-}}
+          customerId={customerId}
+          onClose={() => setShowReceiveModal(false)}
+          onSuccess={(data) => {
+            setShowReceiveModal(false);
+            setPaymentData({
+              amount: data.amount,
+              method: data.payment_mode,
+              date: new Date().toLocaleDateString("en-GB"),
+              customer: {
+                first_name: "Customer",
+                contact_no_1: "",
+              },
+            });
+            setShowSuccess(true);
+          }}
         />
       )}
 
-      {purchaseReturnTarget && (
-        <PurchaseReturnModal invoice={purchaseReturnTarget} onClose={() => setPurchaseReturnTarget(null)}
+      {salesReturnTarget && (
+        <SalesReturnModal invoice={salesReturnTarget} onClose={() => setSalesReturnTarget(null)}
           onConfirm={async (data) => {
             try {
-              const res = await axios.post("http://localhost:8000/api/purchase-return", {
-                purchase_id: purchaseReturnTarget._id, vendor_id: purchaseReturnTarget.vendor_id?._id, date: data.date,
-                details: (data.items || []).map(it => ({ product_id: it.product_id || null, product_name: it.item, qty: it.returnQty, price: it.price, amount: it.returnQty * it.price })),
-                total_amount: data.total || 0, reason: data.reason || "",
+              const res = await axios.post("http://localhost:8000/api/sales-return", {
+                sales_id: salesReturnTarget._id,
+                customer_id: salesReturnTarget.customer_id?._id,
+                date: data.date,
+                details: (data.items || []).map(it => ({
+                  product_id: it.product_id || null,
+                  product_name: it.item,
+                  qty: it.returnQty,
+                  price: it.price,
+                  amount: it.returnQty * it.price,
+                })),
+                total_amount: data.total || 0,
+                reason: data.reason || "",
               });
-              if (res.data.success) { alert("Purchase Return Created Successfully"); setPurchaseReturnTarget(null); }
+              if (res.data.success) { alert("Sales Return Created Successfully"); setSalesReturnTarget(null); }
             } catch (err) { console.error(err); alert("Server Error"); }
           }}
         />
       )}
 
-      {debitNoteTarget && (
-        <DebitNoteModal invoice={debitNoteTarget} onClose={() => setDebitNoteTarget(null)}
+      {creditNoteTarget && (
+        <CreditNoteModal invoice={creditNoteTarget} onClose={() => setCreditNoteTarget(null)}
           onConfirm={async (data) => {
             try {
-              const res = await axios.post("http://localhost:8000/api/debit-note", {
-                purchase_id: debitNoteTarget._id, vendor_id: debitNoteTarget.vendor_id?._id,
-                details: (data.items || []).map(i => ({ product_id: i.product_id || null, product_name: i.item, qty: i.qty, price: i.newPrice, amount: i.qty * i.newPrice })),
-                amount: Number(data.debitTotal), reason: data.reason || "", date: new Date().toISOString(),
+              const res = await axios.post("http://localhost:8000/api/credit-note", {
+                sales_id: creditNoteTarget._id,
+                customer_id: creditNoteTarget.customer_id?._id,
+                details: (data.items || []).map(i => ({
+                  product_id: i.product_id || null,
+                  product_name: i.item,
+                  qty: i.qty,
+                  price: i.newPrice,
+                  amount: i.qty * i.newPrice,
+                })),
+                amount: Number(data.creditTotal),
+                reason: data.reason || "",
+                date: new Date().toISOString(),
               });
-              if (res.data.success) { alert("Debit Note Created Successfully"); setDebitNoteTarget(null); }
+              if (res.data.success) { alert("Credit Note Created Successfully"); setCreditNoteTarget(null); }
             } catch (err) { console.error(err); alert("Server Error"); }
           }}
         />
@@ -496,24 +512,25 @@ if (showSuccess) {
 }
 
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
-function ProfileTab({ vendor }) {
-  const addr = [vendor.address_line_1, vendor.city, vendor.state, vendor.pincode].filter(Boolean).join(", ");
+function ProfileTab({ customer }) {
+  const addr = [customer.address_line_1, customer.city, customer.state, customer.pincode].filter(Boolean).join(", ");
+  const name = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
   return (
     <div className="grid grid-cols-2 gap-4">
       <ProfileCard title="General Details" icon={Ico.Doc}>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
-          <PField label="Party Name"     value={vendor.vendor_name} />
-          <PField label="Party Type"     value={vendor.party_type || "Supplier"} />
-          <PField label="Mobile Number"  value={vendor.contact_no_1} />
-          <PField label="Party Category" value={vendor.party_category} />
+          <PField label="Party Name"     value={name} />
+          <PField label="Party Type"     value={customer.party_type || "Customer"} />
+          <PField label="Mobile Number"  value={customer.contact_no_1 || customer.phone} />
+          <PField label="Party Category" value={customer.party_category} />
         </div>
-        <div className="mb-3"><PField label="Email" value={vendor.email} /></div>
-        <PField label="Opening Balance" value={`₹${vendor.opening_balance ?? 0}`} />
+        <div className="mb-3"><PField label="Email" value={customer.email} /></div>
+        <PField label="Opening Balance" value={`₹${customer.opening_balance ?? 0}`} />
       </ProfileCard>
       <ProfileCard title="Business Details" icon={Ico.Office}>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
-          <PField label="GSTIN"      value={vendor.gstin} />
-          <PField label="PAN Number" value={vendor.pan_number} />
+          <PField label="GSTIN"      value={customer.gstin} />
+          <PField label="PAN Number" value={customer.pan_number} />
         </div>
         <div className="mb-3">
           <p className="text-[11.5px] text-gray-400 mb-0.5">Billing Address</p>
@@ -521,7 +538,7 @@ function ProfileTab({ vendor }) {
         </div>
         <div className="mb-3">
           <p className="text-[11.5px] text-gray-400 mb-0.5">Shipping Address</p>
-          <p className="text-[13px] font-medium text-gray-900">{vendor.vendor_name}</p>
+          <p className="text-[13px] font-medium text-gray-900">{name}</p>
           <p className="text-[13px] text-gray-700">{addr || "-"}</p>
         </div>
         <span className="text-[13px] font-medium text-indigo-600 cursor-pointer hover:underline">Manage Shipping Addresses (1)</span>
@@ -541,28 +558,29 @@ function ProfileTab({ vendor }) {
 }
 
 // ── Tab: Ledger ───────────────────────────────────────────────────────────────
-function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+function LedgerTab({ customer, customerId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState({ totalReceivable: 0, dateRange: "" });
+  const customerName = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
 
   useEffect(() => {
-    if (!vendorId) return;
+    if (!customerId) return;
     setLoading(true);
     Promise.all([
-      axios.get(`http://localhost:8000/api/purchase?vendor_id=${vendorId}`).catch(() => ({ data: { data: [] } })),
-      axios.get(`http://localhost:8000/api/purchase-return?vendor_id=${vendorId}`).catch(() => ({ data: { data: [] } })),
-      axios.get(`http://localhost:8000/api/debit-note?vendor_id=${vendorId}`).catch(() => ({ data: { data: [] } })),
-      axios.get(`http://localhost:8000/api/payment-out?vendor_id=${vendorId}`).catch(() => ({ data: { data: [] } })),
-    ]).then(([purchaseRes, returnRes, debitRes, paymentRes]) => {
-      const purchases = (purchaseRes.data.data || []).map(r => ({ _id: r._id, date: r.invoice_date, voucher: "Purchase Invoice", number: r.supplier_invoice_no || "—", credit: r.total_amount || 0, debit: 0 }));
-      const returns   = (returnRes.data.data  || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Purchase Return",  number: r.return_no || "—",              credit: 0, debit: r.total_amount || 0 }));
-      const debits    = (debitRes.data.data   || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Debit Note",        number: r.debit_note_no || r.return_no || "—", credit: 0, debit: r.amount || r.total_amount || 0 }));
-      const payments  = (paymentRes.data.data || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Payment Out",       number: r.payment_no || "—",             credit: 0, debit: r.amount || 0 }));
+      axios.get(`http://localhost:8000/api/sales?customer_id=${customerId}`).catch(() => ({ data: { data: [] } })),
+      axios.get(`http://localhost:8000/api/sales-return?customer_id=${customerId}`).catch(() => ({ data: { data: [] } })),
+      axios.get(`http://localhost:8000/api/credit-note?customer_id=${customerId}`).catch(() => ({ data: { data: [] } })),
+      axios.get(`http://localhost:8000/api/payment-in?customer_id=${customerId}`).catch(() => ({ data: { data: [] } })),
+    ]).then(([salesRes, returnRes, creditRes, paymentRes]) => {
+      const sales    = (salesRes.data.data   || []).map(r => ({ _id: r._id, date: r.invoice_date,   voucher: "Sales Invoice",  number: r.invoice_no || r.sales_invoice_no || "—", debit: r.total_amount || 0, credit: 0 }));
+      const returns  = (returnRes.data.data  || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Sales Return",    number: r.return_no || "—",                          debit: 0, credit: r.total_amount || 0 }));
+      const credits  = (creditRes.data.data  || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Credit Note",     number: r.credit_note_no || r.return_no || "—",      debit: 0, credit: r.amount || r.total_amount || 0 }));
+      const payments = (paymentRes.data.data || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Payment In",      number: r.payment_no || "—",                         debit: 0, credit: r.amount || 0 }));
 
-      const all = [...purchases, ...returns, ...debits, ...payments].sort((a, b) => new Date(a.date) - new Date(b.date));
-      let balance = vendor.opening_balance || 0;
-      const withBalance = all.map(row => { balance = balance + row.credit - row.debit; return { ...row, runningBalance: balance }; });
+      const all = [...sales, ...returns, ...credits, ...payments].sort((a, b) => new Date(a.date) - new Date(b.date));
+      let balance = customer.opening_balance || 0;
+      const withBalance = all.map(row => { balance = balance + row.debit - row.credit; return { ...row, runningBalance: balance }; });
 
       const dates   = all.map(r => new Date(r.date)).filter(d => !isNaN(d));
       const minDate = dates.length ? new Date(Math.min(...dates)) : null;
@@ -571,15 +589,21 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
       setSummary({ totalReceivable: balance, dateRange: minDate && maxDate ? `${fmtD(minDate)} – ${fmtD(maxDate)}` : "—" });
       setEntries(withBalance);
     }).finally(() => setLoading(false));
-  }, [vendorId]);
+  }, [customerId]);
 
-  const VOUCHER_COLORS = { "Purchase Invoice": "text-blue-700 bg-blue-50", "Purchase Return": "text-orange-700 bg-orange-50", "Debit Note": "text-red-700 bg-red-50", "Payment Out": "text-green-700 bg-green-50" };
+  const VOUCHER_COLORS = {
+    "Sales Invoice":  "text-blue-700 bg-blue-50",
+    "Sales Return":   "text-orange-700 bg-orange-50",
+    "Credit Note":    "text-purple-700 bg-purple-50",
+    "Payment In":     "text-green-700 bg-green-50",
+  };
+
   const cols = [
     { key: "date",    label: "Date",       render: r => fmtDate(r.date) },
     { key: "voucher", label: "Voucher",    render: r => <span className={`px-2 py-0.5 rounded text-xs font-medium ${VOUCHER_COLORS[r.voucher] || "text-gray-600 bg-gray-100"}`}>{r.voucher}</span> },
     { key: "number",  label: "Ref No" },
-    { key: "credit",  label: "Credit (₹)", render: r => r.credit > 0 ? <span className="text-gray-800 font-medium tabular-nums">{fmt(r.credit)}</span> : <span className="text-gray-300">—</span> },
-    { key: "debit",   label: "Debit (₹)",  render: r => r.debit  > 0 ? <span className="text-green-700 font-medium tabular-nums">{fmt(r.debit)}</span>  : <span className="text-gray-300">—</span> },
+    { key: "debit",   label: "Debit (₹)",  render: r => r.debit  > 0 ? <span className="text-gray-800 font-medium tabular-nums">{fmt(r.debit)}</span>  : <span className="text-gray-300">—</span> },
+    { key: "credit",  label: "Credit (₹)", render: r => r.credit > 0 ? <span className="text-green-700 font-medium tabular-nums">{fmt(r.credit)}</span> : <span className="text-gray-300">—</span> },
     { key: "runningBalance", label: "Balance (₹)", render: r => <span className={`font-semibold tabular-nums ${r.runningBalance < 0 ? "text-red-600" : r.runningBalance > 0 ? "text-gray-800" : "text-gray-400"}`}>{r.runningBalance < 0 ? `(${fmt(Math.abs(r.runningBalance))})` : fmt(r.runningBalance)}</span> },
   ];
 
@@ -587,8 +611,8 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
     <>
       <div className="flex gap-2.5 mb-4 flex-wrap">
         <DateFilter showFilter={showFilter} setShowFilter={setShowFilter} selectedFilter={selectedFilter} setSelectedFilter={setSelectedFilter} hoveredFilter={hoveredFilter} setHoveredFilter={setHoveredFilter} filterRef={filterRef} />
-        <ActionBtn icon={Ico.Download} label="Download" onClick={() => downloadCSV("ledger.csv", ["Date","Voucher","Ref No","Credit","Debit","Balance"], entries.map(r => [fmtDate(r.date), r.voucher, r.number, r.credit || "—", r.debit || "—", r.runningBalance]))} />
-        <ActionBtn icon={Ico.Print} label="Print" onClick={() => openPrintWindow(`Ledger — ${vendor.vendor_name}`, `<table><thead><tr><th>Date</th><th>Voucher</th><th>Ref No</th><th>Credit</th><th>Debit</th><th>Balance</th></tr></thead><tbody>${entries.map(r => `<tr><td>${fmtDate(r.date)}</td><td>${r.voucher}</td><td>${r.number}</td><td>${r.credit > 0 ? fmt(r.credit) : "—"}</td><td>${r.debit > 0 ? fmt(r.debit) : "—"}</td><td>${fmt(r.runningBalance)}</td></tr>`).join("")}</tbody></table>`)} />
+        <ActionBtn icon={Ico.Download} label="Download" onClick={() => downloadCSV("ledger.csv", ["Date","Voucher","Ref No","Debit","Credit","Balance"], entries.map(r => [fmtDate(r.date), r.voucher, r.number, r.debit || "—", r.credit || "—", r.runningBalance]))} />
+        <ActionBtn icon={Ico.Print} label="Print" onClick={() => openPrintWindow(`Ledger — ${customerName}`, `<table><thead><tr><th>Date</th><th>Voucher</th><th>Ref No</th><th>Debit</th><th>Credit</th><th>Balance</th></tr></thead><tbody>${entries.map(r => `<tr><td>${fmtDate(r.date)}</td><td>${r.voucher}</td><td>${r.number}</td><td>${r.debit > 0 ? fmt(r.debit) : "—"}</td><td>${r.credit > 0 ? fmt(r.credit) : "—"}</td><td>${fmt(r.runningBalance)}</td></tr>`).join("")}</tbody></table>`)} />
         <button onClick={shareLink} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition"><Ico.Share /> Share <Ico.Chevron /></button>
       </div>
       <div className="border border-gray-200 rounded-xl overflow-visible">
@@ -599,12 +623,12 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
         <div className="px-5 pt-4 pb-4 flex justify-between items-start">
           <div>
             <p className="text-[12px] text-gray-500">To,</p>
-            <p className="text-[14px] font-bold text-gray-900 mt-0.5">{vendor.vendor_name}</p>
-            <p className="text-[12px] text-gray-500 mt-0.5">{vendor.contact_no_1}</p>
+            <p className="text-[14px] font-bold text-gray-900 mt-0.5">{customerName}</p>
+            <p className="text-[12px] text-gray-500 mt-0.5">{customer.contact_no_1 || customer.phone}</p>
           </div>
           <div className="border border-gray-200 rounded-lg px-4 py-3 text-right min-w-[220px]">
             <p className="text-[12px] text-gray-500 pb-2 mb-2 border-b border-gray-200">{summary.dateRange}</p>
-            <p className="text-[12px] text-gray-500">Total Payable</p>
+            <p className="text-[12px] text-gray-500">Total Receivable</p>
             <p className={`text-[16px] font-bold mt-0.5 ${summary.totalReceivable < 0 ? "text-red-600" : "text-gray-900"}`}>{fmt(Math.abs(summary.totalReceivable))}</p>
           </div>
         </div>
@@ -613,7 +637,7 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
             <tr className="bg-gray-50 border-b border-gray-200">
               <td className="px-4 py-3 text-gray-400 italic" colSpan={3}>Opening Balance</td>
               <td className="px-4 py-3 text-gray-300">—</td><td className="px-4 py-3 text-gray-300">—</td>
-              <td className="px-4 py-3 font-semibold text-gray-700 tabular-nums">{fmt(vendor.opening_balance || 0)}</td>
+              <td className="px-4 py-3 font-semibold text-gray-700 tabular-nums">{fmt(customer.opening_balance || 0)}</td>
             </tr>
           </tbody></table>
         </div>
@@ -624,38 +648,38 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
 }
 
 // ── Tab: Payments ─────────────────────────────────────────────────────────────
-function PaymentsTab({ vendorId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+function PaymentsTab({ customerId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading]   = useState(true);
 
   useEffect(() => {
-    if (!vendorId) return;
+    if (!customerId) return;
     setLoading(true);
-    axios.get(`http://localhost:8000/api/payment-out?vendor_id=${vendorId}`)
+    axios.get(`http://localhost:8000/api/payment-in?customer_id=${customerId}`)
       .then(res => { if (res.data.success) setPayments(res.data.data); })
       .catch(() => setPayments([]))
       .finally(() => setLoading(false));
-  }, [vendorId]);
+  }, [customerId]);
 
-  // Refresh when payment made from invoices tab
+  // Refresh when payment received from invoices tab
   useEffect(() => {
     const handle = () => {
       setLoading(true);
-      axios.get(`http://localhost:8000/api/payment-out?vendor_id=${vendorId}`)
+      axios.get(`http://localhost:8000/api/payment-in?customer_id=${customerId}`)
         .then(res => { if (res.data.success) setPayments(res.data.data); })
         .catch(() => {})
         .finally(() => setLoading(false));
     };
     window.addEventListener("paymentUpdated", handle);
     return () => window.removeEventListener("paymentUpdated", handle);
-  }, [vendorId]);
+  }, [customerId]);
 
   const cols = [
     { key: "date",         label: "Date",         render: r => fmtDate(r.date || r.payment_date) },
     { key: "payment_no",   label: "Payment No",   render: r => r.payment_no || r.reference_no || "—" },
     { key: "amount",       label: "Amount",       render: r => fmt(r.amount || r.total_amount) },
     { key: "payment_mode", label: "Payment Mode", render: r => r.payment_mode || "—" },
-    { key: "status",       label: "Status",       render: () => <span className="px-2 py-[3px] text-xs rounded-full bg-green-100 text-green-700 border border-green-300">Paid</span> },
+    { key: "status",       label: "Status",       render: () => <span className="px-2 py-[3px] text-xs rounded-full bg-green-100 text-green-700 border border-green-300">Received</span> },
   ];
 
   return (
@@ -663,7 +687,7 @@ function PaymentsTab({ vendorId, showFilter, setShowFilter, selectedFilter, setS
       <div className="flex gap-2.5 mb-4 flex-wrap">
         <DateFilter showFilter={showFilter} setShowFilter={setShowFilter} selectedFilter={selectedFilter} setSelectedFilter={setSelectedFilter} hoveredFilter={hoveredFilter} setHoveredFilter={setHoveredFilter} filterRef={filterRef} />
         <ActionBtn icon={Ico.Download} label="Download" onClick={() => downloadCSV("payments.csv", ["Date","Payment No","Amount","Mode"], payments.map(r => [fmtDate(r.date), r.payment_no || "—", r.amount, r.payment_mode || "—"]))} />
-        <ActionBtn icon={Ico.Print}    label="Print"    onClick={() => openPrintWindow("Payments", `<table><thead><tr><th>Date</th><th>Payment No</th><th>Amount</th><th>Mode</th></tr></thead><tbody>${payments.map(r => `<tr><td>${fmtDate(r.date)}</td><td>${r.payment_no || "—"}</td><td>${fmt(r.amount)}</td><td>${r.payment_mode || "—"}</td></tr>`).join("")}</tbody></table>`)} />
+        <ActionBtn icon={Ico.Print}    label="Print"    onClick={() => openPrintWindow("Payments Received", `<table><thead><tr><th>Date</th><th>Payment No</th><th>Amount</th><th>Mode</th></tr></thead><tbody>${payments.map(r => `<tr><td>${fmtDate(r.date)}</td><td>${r.payment_no || "—"}</td><td>${fmt(r.amount)}</td><td>${r.payment_mode || "—"}</td></tr>`).join("")}</tbody></table>`)} />
         <button onClick={shareLink} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition"><Ico.Share /> Share <Ico.Chevron /></button>
       </div>
       {loading ? <p className="text-sm text-gray-400 py-8 text-center">Loading...</p> : <TableView cols={cols} rows={payments} />}
@@ -672,10 +696,10 @@ function PaymentsTab({ vendorId, showFilter, setShowFilter, selectedFilter, setS
 }
 
 // ── Root ──────────────────────────────────────────────────────────────────────
-export default function VendorDetails() {
+export default function CustomerDetails() {
   const { id }     = useParams();
   const navigate   = useNavigate();
-  const [vendor, setVendor]       = useState(null);
+  const [customer, setCustomer]   = useState(null);
   const [activeTab, setActiveTab] = useState("invoices");
 
   const [filters, setFilters] = useState({
@@ -689,28 +713,34 @@ export default function VendorDetails() {
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (filterRef.current && !filterRef.current.contains(e.target)) {
-        setFilters(prev => ({ invoices: { ...prev.invoices, show: false }, payments: { ...prev.payments, show: false }, ledger: { ...prev.ledger, show: false } }));
+        setFilters(prev => ({
+          invoices: { ...prev.invoices, show: false },
+          payments: { ...prev.payments, show: false },
+          ledger:   { ...prev.ledger,   show: false },
+        }));
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => { if (id) fetchVendor(); }, [id]);
+  useEffect(() => { if (id) fetchCustomer(); }, [id]);
   useEffect(() => {
-    const handle = () => fetchVendor();
+    const handle = () => fetchCustomer();
     window.addEventListener("paymentUpdated", handle);
     return () => window.removeEventListener("paymentUpdated", handle);
   }, [id]);
 
-  const fetchVendor = async () => {
+  const fetchCustomer = async () => {
     try {
-      const res = await axios.get(`http://localhost:8000/api/vendor/${id}`);
-      if (res.data.success) setVendor(res.data.data);
-    } catch { setVendor(null); }
+      const res = await axios.get(`http://localhost:8000/api/customers/${id}`);
+      if (res.data.success) setCustomer(res.data.data);
+    } catch { setCustomer(null); }
   };
 
-  if (!vendor) return <div className="p-6 text-sm text-gray-500">Loading...</div>;
+  if (!customer) return <div className="p-6 text-sm text-gray-500">Loading...</div>;
+
+  const customerName = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
 
   const TABS = [
     { key: "invoices", label: "Invoices",           icon: Ico.Receipt },
@@ -724,7 +754,7 @@ export default function VendorDetails() {
       <div className="flex items-center justify-between px-6 py-3.5 border-b border-gray-200">
         <div className="flex items-center gap-2.5">
           <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 hover:bg-gray-100 transition text-gray-600"><Ico.Back /></button>
-          <span className="text-[17px] font-semibold text-gray-900">{vendor.vendor_name}</span>
+          <span className="text-[17px] font-semibold text-gray-900">{customerName}</span>
         </div>
         <div className="flex items-center gap-2">
           <ActionBtn icon={Ico.Edit}  label="Edit" />
@@ -750,10 +780,35 @@ export default function VendorDetails() {
       </div>
 
       <div className="p-6">
-        {activeTab === "invoices" && <TransactionsTab vendorId={id} showFilter={filters.invoices.show} setShowFilter={v => updateFilter("invoices","show",v)} selectedFilter={filters.invoices.selected} setSelectedFilter={v => updateFilter("invoices","selected",v)} hoveredFilter={filters.invoices.hovered} setHoveredFilter={v => updateFilter("invoices","hovered",v)} filterRef={filterRef} />}
-        {activeTab === "payments" && <PaymentsTab     vendorId={id} showFilter={filters.payments.show} setShowFilter={v => updateFilter("payments","show",v)} selectedFilter={filters.payments.selected} setSelectedFilter={v => updateFilter("payments","selected",v)} hoveredFilter={filters.payments.hovered} setHoveredFilter={v => updateFilter("payments","hovered",v)} filterRef={filterRef} />}
-        {activeTab === "profile"  && <ProfileTab vendor={vendor} />}
-        {activeTab === "ledger"   && <LedgerTab   vendor={vendor} vendorId={id} showFilter={filters.ledger.show} setShowFilter={v => updateFilter("ledger","show",v)} selectedFilter={filters.ledger.selected} setSelectedFilter={v => updateFilter("ledger","selected",v)} hoveredFilter={filters.ledger.hovered} setHoveredFilter={v => updateFilter("ledger","hovered",v)} filterRef={filterRef} />}
+        {activeTab === "invoices" && (
+          <TransactionsTab
+            customerId={id}
+            showFilter={filters.invoices.show}       setShowFilter={v => updateFilter("invoices","show",v)}
+            selectedFilter={filters.invoices.selected} setSelectedFilter={v => updateFilter("invoices","selected",v)}
+            hoveredFilter={filters.invoices.hovered}  setHoveredFilter={v => updateFilter("invoices","hovered",v)}
+            filterRef={filterRef}
+          />
+        )}
+        {activeTab === "payments" && (
+          <PaymentsTab
+            customerId={id}
+            showFilter={filters.payments.show}       setShowFilter={v => updateFilter("payments","show",v)}
+            selectedFilter={filters.payments.selected} setSelectedFilter={v => updateFilter("payments","selected",v)}
+            hoveredFilter={filters.payments.hovered}  setHoveredFilter={v => updateFilter("payments","hovered",v)}
+            filterRef={filterRef}
+          />
+        )}
+        {activeTab === "profile" && <ProfileTab customer={customer} />}
+        {activeTab === "ledger" && (
+          <LedgerTab
+            customer={customer}
+            customerId={id}
+            showFilter={filters.ledger.show}       setShowFilter={v => updateFilter("ledger","show",v)}
+            selectedFilter={filters.ledger.selected} setSelectedFilter={v => updateFilter("ledger","selected",v)}
+            hoveredFilter={filters.ledger.hovered}  setHoveredFilter={v => updateFilter("ledger","hovered",v)}
+            filterRef={filterRef}
+          />
+        )}
       </div>
     </div>
   );

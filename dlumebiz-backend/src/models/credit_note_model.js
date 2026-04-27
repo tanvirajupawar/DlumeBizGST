@@ -8,11 +8,10 @@ const creditNoteSchema = new mongoose.Schema(
       required: true,
     },
 
-    customer_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Client",
-      required: true,
-    },
+  client_id: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Client",
+},
 
     credit_no: {
       type: String,

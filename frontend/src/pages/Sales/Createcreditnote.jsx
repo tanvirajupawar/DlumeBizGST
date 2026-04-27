@@ -5,6 +5,9 @@ import { FiChevronDown, FiX, FiPlus } from "react-icons/fi";
 import { HiOutlineSearch } from "react-icons/hi";
 import Button from "../../components/Button";
 
+
+
+
 const fmt = (n) =>
   "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 });
 
@@ -165,6 +168,7 @@ const CreateCreditNote = () => {
   const [invoice, setInvoice] = useState(null);
   const [reason, setReason] = useState("");
   const [rows, setRows] = useState([]);
+  const [creditNoteNumber, setCreditNoteNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   // Additional charges
@@ -189,7 +193,7 @@ const CreateCreditNote = () => {
   // Fetch next credit note number
   useEffect(() => {
     axios.get("http://localhost:8000/api/credit-note/next-number")
-      .then((res) => { if (res.data.success) setCreditNoteNumber(res.data.credit_note_no); })
+      .then((res) => { if (res.data.success) setCreditNoteNumber(res.data.number); })
       .catch(() => setCreditNoteNumber("CN-001"));
   }, []);
 
@@ -228,7 +232,7 @@ const CreateCreditNote = () => {
     setSubmitting(true);
     try {
       await axios.post("http://localhost:8000/api/credit-note", {
-        customer_id: customer._id,
+        client_id: customer._id,
        sales_id: invoice._id,
         reason,
         details: rows.map((r) => ({
@@ -265,16 +269,42 @@ const CreateCreditNote = () => {
           <div className="p-5">
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Bill To</p>
             <CustomerSelector value={customer} onChange={handleCustomerChange} />
-            {customer && (
-              <div className="mt-3 space-y-0.5">
-                {customer.gstin && <p className="text-xs text-gray-500 font-mono">GSTIN: {customer.gstin}</p>}
-                <div className="text-xs text-gray-500 leading-relaxed">
-                  {[customer.address_line_1, customer.address_line_2].filter(Boolean).join(", ")}
-                  <br />
-                  {[customer.city, customer.state, customer.pincode].filter(Boolean).join(", ")}
-                </div>
-              </div>
-            )}
+        {customer && (
+  <div className="mt-3 space-y-1 text-xs text-gray-600">
+
+    {/* Name + Company */}
+    <p className="font-semibold text-gray-800">
+      {`${customer.first_name || ""} ${customer.last_name || ""}`.trim() ||
+        customer.company_name}
+    </p>
+
+    {customer.company_name && (
+      <p className="text-gray-500">{customer.company_name}</p>
+    )}
+
+    {/* Phone */}
+    {customer.phone && (
+      <p>📞 {customer.phone}</p>
+    )}
+
+    {/* GST */}
+    {customer.gstin && (
+      <p className="font-mono text-blue-600">GSTIN: {customer.gstin}</p>
+    )}
+
+    {/* Address */}
+    <div className="leading-relaxed">
+      {[customer.address_line_1, customer.address_line_2]
+        .filter(Boolean)
+        .join(", ")}
+      <br />
+      {[customer.city, customer.state, customer.pincode]
+        .filter(Boolean)
+        .join(", ")}
+    </div>
+
+  </div>
+)}
           </div>
 
           {/* LINK INVOICE */}
@@ -303,7 +333,7 @@ const CreateCreditNote = () => {
             <div>
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Credit Note No</p>
               <input
-               value="Auto Generated"
+               value={creditNoteNumber || "Loading..."}
                 readOnly
                 className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-gray-50 text-gray-600 font-mono cursor-not-allowed"
               />

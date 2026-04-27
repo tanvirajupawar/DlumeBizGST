@@ -1,6 +1,8 @@
 import { useState, useRef } from "react";
 import { FiTrash2 } from "react-icons/fi";
 import Modal from "./Modal";
+import { useEffect } from "react";
+import axios from "axios";
 
 const fmt = (n) => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 });
 
@@ -33,9 +35,22 @@ const fmt = (n) => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDi
  *  )}
  */
 const CreditNoteModal = ({ invoice, onClose, onConfirm }) => {
-  const creditNumber = useRef(
-    `CN-${invoice.invoiceNo}-${Date.now().toString().slice(-4)}`
-  );
+const [creditNumber, setCreditNumber] = useState("");
+
+useEffect(() => {
+  const fetchCN = async () => {
+    try {
+      const res = await axios.get("http://localhost:8000/api/credit-note/next-number");
+      if (res.data.success) {
+        setCreditNumber(res.data.number);
+      }
+    } catch (err) {
+      console.error("CN NUMBER ERROR:", err);
+    }
+  };
+
+  fetchCN();
+}, []);
 
   const [items, setItems] = useState(
     invoice.items.map((item) => ({ ...item, newPrice: item.price }))
@@ -62,9 +77,14 @@ const CreditNoteModal = ({ invoice, onClose, onConfirm }) => {
 
       {/* Header meta row */}
       <div className="flex items-start justify-between -mt-3 gap-4">
-        <p className="text-xs text-gray-400">
-          {invoice.customer} &nbsp;·&nbsp; {invoice.date}
-        </p>
+      <div className="flex flex-col">
+  <p className="text-sm font-semibold text-gray-800">
+    {invoice.customerName || invoice.customer || "Walk-in"}
+  </p>
+  <p className="text-xs text-gray-400">
+    {invoice.date}
+  </p>
+</div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
@@ -79,7 +99,7 @@ const CreditNoteModal = ({ invoice, onClose, onConfirm }) => {
               Credit No
             </p>
             <p className="text-xs font-bold text-green-800 font-mono">
-              {creditNumber.current}
+           {creditNumber || "Loading..."}
             </p>
           </div>
         </div>
@@ -87,9 +107,8 @@ const CreditNoteModal = ({ invoice, onClose, onConfirm }) => {
 
       {/* Table */}
       <div className="-mx-6">
-        <div className="grid grid-cols-[minmax(0,2fr)_90px_110px_130px_60px_110px_44px] border-y border-gray-200 bg-white px-6">
+        <div className="grid grid-cols-[minmax(0,2fr)_110px_130px_60px_110px_44px] border-y border-gray-200 bg-white px-6">
           <div className="py-3 text-sm font-semibold text-gray-800">Item Name</div>
-          <div className="py-3 text-sm font-semibold text-gray-800 text-right">Item Code</div>
           <div className="py-3 text-sm font-semibold text-gray-800 text-right">Sale Price</div>
           <div className="py-3 text-sm font-semibold text-gray-800 text-right">New Price</div>
           <div className="py-3 text-sm font-semibold text-gray-800 text-right">Qty</div>
@@ -104,15 +123,13 @@ const CreditNoteModal = ({ invoice, onClose, onConfirm }) => {
         {items.map((item, idx) => (
           <div
             key={idx}
-            className={`grid grid-cols-[minmax(0,2fr)_90px_110px_130px_60px_110px_44px] px-6 items-center
+            className={`grid grid-cols-[minmax(0,2fr)_110px_130px_60px_110px_44px] px-6 items-center
               ${idx !== items.length - 1 ? "border-b border-gray-100" : ""}`}
           >
             <div className="py-3.5">
               <p className="text-sm font-medium text-gray-800">{item.item}</p>
             </div>
-            <div className="py-3.5 text-sm text-gray-500 text-right font-mono">
-              {item.code ?? "—"}
-            </div>
+         
             <div className="py-3.5 text-sm text-gray-500 text-right tabular-nums">
               {fmt(item.price)}
             </div>
@@ -167,7 +184,7 @@ const CreditNoteModal = ({ invoice, onClose, onConfirm }) => {
                 invoice,
                 items,
                 creditTotal,
-                creditNumber: creditNumber.current,
+                creditNumber: creditNumber,
               })
             }
             className="px-5 py-2 text-sm bg-green-700 text-white rounded-lg font-medium hover:bg-green-800 disabled:opacity-40 disabled:cursor-not-allowed transition"

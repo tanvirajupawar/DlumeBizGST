@@ -86,7 +86,6 @@ return {
   salePrice: item.salesPrice || 0,   // ✅ ADD THIS
 
   purchasePrice: item.purchasePrice || 0,
-  gstRate: item.gstRate || 18,
   unit: item.unit || "NOS",
   discount: 0,
   itemType: item.itemType || "Goods",
@@ -111,7 +110,6 @@ return {
         unit:           newItemForm.unit,
         purchase_price: newItemForm.purchasePrice,
         mrp:            newItemForm.salePrice || 0,
-        gst_rate:       newItemForm.gstRate   || 18,
         company_id:     localStorage.getItem("company_id"),
       };
       const res = await axios.post("http://localhost:8000/api/product", payload);
@@ -157,7 +155,7 @@ if (res.data.success) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-      <div style={{ background: "#fff", borderRadius: "12px", width: "100%", maxWidth: "860px", boxShadow: "0 24px 64px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", maxHeight: "88vh", overflow: "hidden" }}>
+      <div style={{ background: "#fff", borderRadius: "12px", width: "100%", maxWidth: "860px", boxShadow: "0 24px 64px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", maxHeight: "92vh", overflow: "hidden" }}>
 
         <div style={{ padding: "18px 24px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <div style={{ fontWeight: 700, fontSize: "16px", color: "#111827" }}>Add Items to Bill</div>
@@ -234,13 +232,7 @@ if (res.data.success) {
                   onFocus={(e) => (e.target.style.borderColor = "#2563eb")} onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")} />
               </div>
 
-              {/* GST Rate */}
-              <div style={{ flex: "0.8 1 70px" }}>
-                <label style={{ fontSize: "10px", color: "#6b7280", display: "block", marginBottom: "3px", textTransform: "uppercase", fontWeight: 600 }}>GST %</label>
-                <select style={{ ...inp, width: "100%" }} value={newItemForm.gstRate} onChange={(e) => setNewItemForm((f) => ({ ...f, gstRate: Number(e.target.value) }))}>
-                  {gstOptions.map((r) => <option key={r} value={r}>{r}%</option>)}
-                </select>
-              </div>
+            
 
               <div style={{ display: "flex", gap: "6px", flexShrink: 0, alignSelf: "flex-end" }}>
                 <button onClick={handleSaveNewItem} style={{ padding: "6px 14px", border: "none", borderRadius: "6px", background: "#2563eb", color: "#fff", fontSize: "12px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Add</button>
@@ -250,18 +242,18 @@ if (res.data.success) {
           </div>
         )}
 
-        <div style={{ overflowY: "auto", flex: 1 }}>
+<div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
             <thead style={{ position: "sticky", top: 0, zIndex: 1 }}>
               <tr style={{ background: "#fff", borderBottom: "2px solid #e5e7eb" }}>
-                {["Item Name", "HSN", "Size/Pack", "Stock", "GST%", "Sale Price", "Purchase Price", "Quantity"].map((h) => (
+                {["Item Name", "HSN", "Size/Pack", "Stock", "Sale Price", "Purchase Price", "Quantity"].map((h) => (
                   <th key={h} style={{ padding: "11px 16px", textAlign: ["Quantity"].includes(h) ? "center" : ["Sale Price", "Purchase Price"].includes(h) ? "right" : "left", fontSize: "13px", fontWeight: 700, color: "#374151", whiteSpace: "nowrap" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={8} style={{ padding: "30px", textAlign: "center", color: "#9ca3af", fontSize: "13.5px" }}>No items found.</td></tr>
+                <tr><td colSpan={7} style={{ padding: "30px", textAlign: "center", color: "#9ca3af", fontSize: "13.5px" }}>No items found.</td></tr>
               )}
               {filtered.map((item) => {
                 const key     = String(item.id);
@@ -275,7 +267,6 @@ if (res.data.success) {
                     <td style={{ padding: "12px 16px", color: "#6b7280", fontFamily: "monospace", fontSize: "12.5px" }}>{item.hsn || "-"}</td>
                     <td style={{ padding: "12px 16px", color: "#6b7280" }}>{item.size || "-"}</td>
                     <td style={{ padding: "12px 16px", color: "#6b7280" }}>{item.stock != null ? item.stock + " " + (item.unit || "") : "-"}</td>
-                    <td style={{ padding: "12px 16px", color: "#6b7280", textAlign: "center" }}>{item.gstRate}%</td>
                     <td style={{ padding: "12px 16px", textAlign: "right", color: "#374151" }}>{item.salesPrice > 0 ? "₹" + item.salesPrice.toLocaleString("en-IN") : "₹0"}</td>
                     <td style={{ padding: "12px 16px", textAlign: "right", color: "#374151" }}>{item.purchasePrice > 0 ? "₹" + item.purchasePrice.toLocaleString("en-IN") : "₹0"}</td>
                     <td style={{ padding: "10px 16px", textAlign: "center" }}>
@@ -285,13 +276,19 @@ if (res.data.success) {
                             if (isSales && item.stock <= 0) { alert("Out of stock"); return; }
                             toggleItem(item);
                           }}
-                          style={{
-                            padding: "7px 20px", border: "1.5px solid #bfdbfe", borderRadius: "7px",
-                            background: (isSales && item.stock <= 0) ? "#e5e7eb" : "#eff6ff",
-                            cursor:     (isSales && item.stock <= 0) ? "not-allowed" : "pointer",
-                            color: (isSales && item.stock <= 0) ? "#9ca3af" : "#2563eb",
-                            fontSize: "13px", fontWeight: 700, fontFamily: "inherit", minWidth: "80px",
-                          }}
+                        style={{
+  padding: "5px 12px",
+  border: "1.5px solid #bfdbfe",
+  borderRadius: "7px",
+  background: (isSales && item.stock <= 0) ? "#e5e7eb" : "#eff6ff",
+  cursor: (isSales && item.stock <= 0) ? "not-allowed" : "pointer",
+  color: (isSales && item.stock <= 0) ? "#9ca3af" : "#2563eb",
+  fontSize: "12px",
+  fontWeight: 700,
+  fontFamily: "inherit",
+  width: "auto",
+  whiteSpace: "nowrap",
+}}
                           onMouseEnter={(e) => { if (!(isSales && item.stock <= 0)) { e.currentTarget.style.background = "#2563eb"; e.currentTarget.style.color = "#fff"; } }}
                           onMouseLeave={(e) => { e.currentTarget.style.background = (isSales && item.stock <= 0) ? "#e5e7eb" : "#eff6ff"; e.currentTarget.style.color = (isSales && item.stock <= 0) ? "#9ca3af" : "#2563eb"; }}>
                           {(isSales && item.stock <= 0) ? "Out of stock" : "+ Add"}
@@ -342,11 +339,21 @@ export default function ItemsTable({
 }) {
   const [showItemModal, setShowItemModal] = useState(false);
 
-  const colWidths = {
-    num: "3%", name: "16%", type: "10%", hsn: "6%", unit: "6%",
-    qty: "5%", price: "9%", discount: "7%", taxable: "9%",
-    gst: "5%", tax: "8%", total: "9%", del: "3%",
-  };
+const colWidths = {
+  num:      "40px",
+  name:     "18%",
+  type:     "10%",
+  hsn:      "7%",
+  unit:     "7%",
+  qty:      "5%",
+  price:    "10%",
+  discount: "7%",
+  taxable:  "9%",
+  gst:      "6%",   
+  tax:      "8%",  
+  total:    "8%",
+  del:      "30px",
+};
 
   const thStyle = (align = "left") => ({
     padding: "9px 8px", textAlign: align, fontSize: "11px", fontWeight: 700,
@@ -382,22 +389,21 @@ export default function ItemsTable({
           {Object.values(colWidths).map((w, i) => <col key={i} style={{ width: w }} />)}
         </colgroup>
         <thead>
-          <tr>
-            <th style={thStyle("center")}>#</th>
-            <th style={thStyle()}>Item Name</th>
-            <th style={thStyle()}>Type</th>
-            <th style={thStyle()}>HSN</th>
-            <th style={thStyle("center")}>Unit</th>
-            <th style={thStyle("center")}>Qty</th>
-            {/* ✅ Header label switches based on context */}
-            <th style={thStyle("right")}>{isSales ? "Sale Price (₹)" : "Purchase Price (₹)"}</th>
-            <th style={thStyle("right")}>Disc (₹)</th>
-            <th style={thStyle("right")}>Taxable (₹)</th>
-            <th style={thStyle("center")}>GST%</th>
-            <th style={thStyle("right")}>Tax (₹)</th>
-            <th style={thStyle("right")}>Total (₹)</th>
-            <th style={thStyle()}></th>
-          </tr>
+        <tr>
+  <th style={thStyle("center")}>#</th>
+  <th style={thStyle()}>Item Name</th>
+  <th style={thStyle()}>Type</th>
+  <th style={thStyle()}>HSN</th>
+  <th style={thStyle("center")}>Unit</th>
+  <th style={thStyle("center")}>Qty</th>
+  <th style={thStyle("right")}>{isSales ? "Sale Price (₹)" : "Purchase Price (₹)"}</th>
+  <th style={thStyle("right")}>Disc (₹)</th>
+  <th style={thStyle("right")}>Taxable (₹)</th>
+  <th style={thStyle("center")}>GST %</th>   
+  <th style={thStyle("right")}>Tax (₹)</th>
+  <th style={thStyle("right")}>Total (₹)</th>
+  <th style={thStyle()}></th>
+</tr>
         </thead>
         <tbody>
           {items.map((item, i) => {
@@ -504,7 +510,7 @@ export default function ItemsTable({
 
           {items.length === 0 && (
             <tr>
-              <td colSpan={13} style={{ padding: "28px", textAlign: "center", color: "#9ca3af", fontSize: "13px" }}>
+              <td colSpan={12} style={{ padding: "28px", textAlign: "center", color: "#9ca3af", fontSize: "13px" }}>
                 No items added yet.{" "}
                 <span onClick={() => setShowItemModal(true)} style={{ color: "#2563eb", cursor: "pointer", fontWeight: 600 }}>
                   Add from catalog?

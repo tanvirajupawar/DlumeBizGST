@@ -9,6 +9,7 @@ import { FiCreditCard } from "react-icons/fi";
 import ActionMenu from "../../components/ActionMenu";
 import SalesReturnModal from "../../components/SalesReturnModal";
 import CreditNoteModal from "../../components/CreditNoteModal";
+import StatusBadge from "../../components/StatusBadge";
 
 /* ── Data ── */
 
@@ -28,7 +29,7 @@ const SalesInvoiceList = () => {
   const [salesReturnTarget, setSalesReturnTarget] = useState(null);
 const [creditNoteTarget, setCreditNoteTarget] = useState(null);
   const [paymentTarget, setPaymentTarget] = useState(null);
-
+const [dateRange, setDateRange] = useState({ from: "", to: "" });
 
   useEffect(() => {
   fetchInvoices();
@@ -44,7 +45,8 @@ const fetchInvoices = async () => {
     const data = res.data.data || res.data; // handle both cases
 
     const mapped = (data || []).map((inv) => ({
-      id: inv._id,
+_id: inv._id,
+id: inv._id,
       customer_id: inv.client_id?._id,
       invoiceNo: inv.invoice_no,
   customerName: inv.client_id
@@ -56,12 +58,13 @@ companyName: inv.client_id?.company_name || "",
       amount: inv.total_amount,
       confirmed: inv.status === "Paid",
 
-      items: (inv.details || []).map(d => ({
-        item: d.product_name,
-        qty: d.qty,
-        price: d.price,
-        total: d.amount,
-      })),
+     items: (inv.details || []).map(d => ({
+  product_id: d.product_id,   // ✅ ADD THIS
+  item: d.product_name,
+  qty: d.qty,
+  price: d.price,
+  total: d.amount,
+})),
     }));
 
     setInvoices(mapped);
@@ -212,7 +215,8 @@ const filteredCollections = collections.filter(
 
   {isInvoice && (
   <>
- <div className="grid grid-cols-[1fr_1fr_140px_130px_130px_120px_90px_40px_40px]  border-b border-gray-200 bg-gray-50 px-6">
+ <div className="grid grid-cols-[60px_1fr_1fr_140px_130px_130px_120px_90px_40px_40px]  border-b border-gray-200 bg-gray-50 px-6">
+ <div className="py-3 text-xs font-semibold text-gray-500 uppercase text-center">Sr No</div>
   <div className="py-3 text-xs font-semibold text-gray-500 uppercase">Customer</div>
 <div className="py-3 text-xs font-semibold text-gray-500 uppercase">Company</div>
 <div className="py-3 text-xs font-semibold text-gray-500 uppercase">Invoice No</div>
@@ -247,35 +251,41 @@ const filteredCollections = collections.filter(
         className={!isLast ? "border-b border-gray-100" : ""}
       >
         <div
-          className={`grid grid-cols-[1fr_1fr_140px_130px_130px_120px_90px_40px_40px] px-6 items-center cursor-pointer transition
+          className={`grid grid-cols-[60px_1fr_1fr_140px_130px_130px_120px_90px_40px_40px] px-6 items-center cursor-pointer transition
           ${selectedInvoice?.id === inv.id ? "bg-blue-50/60" : "hover:bg-gray-50"}`}
           onClick={() => setSelectedInvoice(inv)}
         >
+<div className="py-4 text-sm text-center text-gray-500">
+  {idx + 1}
+</div>
+
   <div className="py-4 text-sm font-semibold text-gray-800">
   {inv.customerName}
 </div>
 
-<div className="py-4 text-xs text-gray-500">
+<div className="py-4 text-sm text-gray-500 ">
   {inv.companyName}
 </div>
 
           <div className="py-4 text-sm text-gray-500 font-mono">
             {inv.invoiceNo}
           </div>
-
-          <div className="py-4 text-sm text-gray-500">
-            {inv.date}
-          </div>
+<div className="py-4 text-sm text-gray-500">
+  {(() => {
+    const d = new Date(inv.date);
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  })()}
+</div>
 
           <div className="py-4 text-sm text-right pr-6 font-semibold">
             {fmt(inv.amount)}
           </div>
 
           <div className="py-4 flex justify-center">
-            <span className={`text-[10px] px-2 py-0.5 rounded font-semibold
-              ${inv.confirmed ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
-              {inv.confirmed ? "Paid" : "Pending"}
-            </span>
+<StatusBadge status={inv.status} />
           </div>
 
 {/* PAY BUTTON */}
@@ -477,22 +487,34 @@ onCreditNote={() => setCreditNoteTarget(inv)}
       try {
         console.log("SALES RETURN DATA:", data);
 
-        const payload = {
-          sales_id: salesReturnTarget.id,
-          customer_id: salesReturnTarget.customer_id,
+    const payload = {
+sales_id: salesReturnTarget._id || salesReturnTarget.id,
+  client_id: salesReturnTarget.customer_id,
+  date: data.date,
 
-          date: data.date,
+details: (data.items || [])
+  .map(it => {
+    const qty = Number(it.returnQty);
+    const price = Number(it.price) || 0;
 
-          details: (data.items || []).map(it => ({
-            product_name: it.item,
-            qty: it.returnQty,
-            price: it.price,
-            amount: it.returnQty * it.price
-          })),
+    if (!qty || qty <= 0) return null;
 
-          total_amount: data.total || 0,
-          reason: data.reason || ""
-        };
+    return {
+      product_id: it.product_id || null,
+      product_name: it.item,
+      qty,
+      price,
+      amount: qty * price
+    };
+  })
+  .filter(Boolean),
+
+  total_amount: data.total || 0,
+  reason: data.reason || ""
+};
+
+console.log("DETAILS ONLY:", payload.details); // ✅ ADD THIS
+console.log("SALES RETURN PAYLOAD:", payload);
 
         console.log("SALES RETURN PAYLOAD:", payload);
 

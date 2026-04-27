@@ -33,10 +33,28 @@ const vendorController = {
   .lean();
 
 
-  const result = vendors.map(v => ({
-  ...v,
-  pending_amount: v.pending_amount ?? v.opening_balance ?? 0, // ✅ fallback
-}));
+const result = await Promise.all(
+  vendors.map(async (v) => {
+
+    const invoices = await PurchaseOrderModel.find({
+      vendor_id: v._id
+    });
+
+    const outstanding = invoices.reduce((sum, inv) => {
+      const balance =
+        inv.balance_amount !== undefined && inv.balance_amount !== null
+          ? Number(inv.balance_amount)
+          : Number(inv.total_amount || 0);
+
+      return sum + balance;
+    }, 0);
+
+    return {
+      ...v,
+      pending_amount: outstanding   // 🔥 THIS IS THE FIX
+    };
+  })
+);
 
     return res.json({
   success: true,
@@ -101,75 +119,48 @@ const vendor = new vendorModel({
   },
 
   
-  fetch: async function (req, res) {
-    try {
-      const id = req.params.id;
-      const vendor = await vendorModel.findById(id).populate("company_id");
 
 
-       const totals = await PurchaseOrderModel.aggregate([
-            { $match: { vendor_id: vendor._id  } },
-            {
-              $group: {
-                _id: null,
-                total_amount: { $sum: "$total_amount" },
-              },
-            },
-          ]);
+fetch: async function (req, res) {
+  try {
+    const id = req.params.id;
+    const vendor = await vendorModel.findById(id).populate("company_id");
 
-        const received = await PurchaseReceipt.aggregate([
-          { $match: { vendor_id: vendor._id } },
-          {
-            $group: {
-              _id: null,
-              amount: { $sum: "$amount" },
-            },
-          },
-        ]);
-        console.log(received);
-        let receiptAmount = 0
-
-        if(received.length > 0){
-           receiptAmount = received[0]?.amount || 0;
-        }
-
-        
-
-       let totalAmount = 0;
-let paidAmount = 0;
-let outstandingAmount = 0;
-
-const opening = vendor.opening_balance || 0; 
-
-if (totals.length > 0) {
-  totalAmount = totals[0].total_amount || 0;
-  paidAmount = receiptAmount || 0;
-  outstandingAmount = totalAmount - paidAmount + opening; 
-} else {
-  outstandingAmount = opening; 
-}
-
-        const vendorObj = vendor.toObject();
-        vendorObj.totalAmount = totalAmount;
-        vendorObj.paidAmount = paidAmount;
-        vendorObj.outstandingAmount = outstandingAmount;
-      
-
-      if (!vendorObj) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Vendor not found" });
-      }
-
-      return res.json({ success: true, data: vendorObj });
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: "Server Error",
-        error: error.message || error,
-      });
+    if (!vendor) {
+      return res.status(404).json({ success: false, message: "Vendor not found" });
     }
-  },
+
+    // ── Compute pending_amount live from invoice balance_amounts ──
+    const invoices = await PurchaseOrderModel.find({ vendor_id: vendor._id });
+
+    const pending = invoices.reduce((sum, inv) => {
+      const bal =
+        inv.balance_amount !== undefined && inv.balance_amount !== null
+          ? Number(inv.balance_amount)
+          : Number(inv.total_amount || 0);
+      return sum + bal;
+    }, 0);
+
+    // ── Keep existing totals for backward compat ──
+    const totalAmount = invoices.reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
+    const paidAmount  = totalAmount - pending;
+
+    const vendorObj = vendor.toObject();
+    vendorObj.pending_amount    = pending;       // ✅ used by VendorList payable column
+    vendorObj.totalAmount       = totalAmount;
+    vendorObj.paidAmount        = paidAmount;
+    vendorObj.outstandingAmount = pending;       // alias for anything reading outstandingAmount
+
+    return res.json({ success: true, data: vendorObj });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message || error,
+    });
+  }
+},
 
   
   update: async function (req, res) {

@@ -122,11 +122,19 @@ const handleDownload = () => {
           {[
             { label: "Date",   value: invoice.date },
             { label: "Amount", value: fmt(invoice.amount), mono: true },
-            {
-              label: "Status",
-              value: invoice.confirmed ? "Confirmed" : "Pending",
-              badge: invoice.confirmed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700",
-            },
+          {
+  label: "Status",
+  value: (() => {
+    if (invoice.balance_amount === 0) return "Paid";
+    if (invoice.balance_amount < invoice.amount) return "Partial";
+    return "Unpaid";
+  })(),
+  badge: (() => {
+    if (invoice.balance_amount === 0) return "bg-green-100 text-green-800";
+    if (invoice.balance_amount < invoice.amount) return "bg-yellow-100 text-yellow-800";
+    return "bg-red-100 text-red-700";
+  })(),
+},
           ].map(({ label, value, mono, badge }) => (
             <div key={label} className="px-5 py-3">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-1">{label}</p>

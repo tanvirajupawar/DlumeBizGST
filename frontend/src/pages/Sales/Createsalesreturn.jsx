@@ -272,22 +272,42 @@ const CreateSalesReturn = () => {
           <div className="p-5">
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Bill To</p>
             <CustomerSelector value={customer} onChange={handleCustomerChange} />
-            {customer && (
-              <div className="mt-3 space-y-0.5">
-                {customer.gstin && (
-                  <p className="text-xs text-gray-500 font-mono">GSTIN: {customer.gstin}</p>
-                )}
-                <div className="text-xs text-gray-500 leading-relaxed">
-                  {[customer.address_line_1, customer.address_line_2]
-                    .filter(Boolean)
-                    .join(", ")}
-                  <br />
-                  {[customer.city, customer.state, customer.pincode]
-                    .filter(Boolean)
-                    .join(", ")}
-                </div>
-              </div>
-            )}
+           {customer && (
+  <div className="mt-3 space-y-1 text-xs text-gray-600">
+
+    {/* Name + Company */}
+    <p className="font-semibold text-gray-800">
+      {`${customer.first_name || ""} ${customer.last_name || ""}`.trim() ||
+        customer.company_name}
+    </p>
+
+    {customer.company_name && (
+      <p className="text-gray-500">{customer.company_name}</p>
+    )}
+
+    {/* Phone */}
+    {customer.phone && (
+      <p>📞 {customer.phone}</p>
+    )}
+
+    {/* GST */}
+    {customer.gstin && (
+      <p className="font-mono text-blue-600">GSTIN: {customer.gstin}</p>
+    )}
+
+    {/* Address */}
+    <div className="leading-relaxed">
+      {[customer.address_line_1, customer.address_line_2]
+        .filter(Boolean)
+        .join(", ")}
+      <br />
+      {[customer.city, customer.state, customer.pincode]
+        .filter(Boolean)
+        .join(", ")}
+    </div>
+
+  </div>
+)}
           </div>
 
           {/* LINK INVOICE */}

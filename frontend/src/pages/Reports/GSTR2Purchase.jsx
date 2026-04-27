@@ -5,7 +5,7 @@ import { saveAs } from "file-saver";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TABS = ["Purchase", "Purchase Return", "Purchase Summary", "ITC Summary"];
+const TABS = ["Purchase", "Purchase Return / Debit Note", "Purchase Summary", "ITC Summary"];
 
 const FILTERS = [
   "Today", "Yesterday", "This Week", "Last Week", "Last 7 Days",
@@ -95,53 +95,29 @@ function filterByDate(rows, filter, dateField) {
   });
 }
 
-// ─── ✅ FIXED: robust GSTIN + vendor name extraction ─────────────────────────
-// Handles all cases:
-//   1. vendor_id is a populated object  → read gst / gstin / gst_no from it
-//   2. vendor_id is just an ID string   → fall back to flat fields on the purchase doc
-//   3. GSTIN stored directly on the purchase doc itself
 function extractVendorInfo(p) {
   const v = typeof p.vendor_id === "object" && p.vendor_id !== null ? p.vendor_id : null;
-
-  // GSTIN — try every possible field name the backend might use
   const gstin =
-    v?.gst        ||
-    v?.gstin      ||
-    v?.gst_no     ||
-    v?.gst_number ||
-    p.vendor_gst  ||
-    p.gstin       ||
-    p.gst         ||
-    "";
-
-  // Vendor name — try every possible field name
+    v?.gst || v?.gstin || v?.gst_no || v?.gst_number ||
+    p.vendor_gst || p.gstin || p.gst || "";
   const vendorName =
-    v?.company_name ||
-    v?.vendor_name  ||
-    v?.name         ||
-    p.vendor_name   ||
-    p.company_name  ||
-    "—";
-
+    v?.company_name || v?.vendor_name || v?.name ||
+    p.vendor_name || p.company_name || "—";
   return { gstin: gstin.trim(), vendorName };
 }
 
 function calcTax(p) {
   const { gstin, vendorName } = extractVendorInfo(p);
-
   const vendorState = gstin.substring(0, 2);
   const isIntra     = vendorState === BUYER_STATE;
 
-  // taxable: sum item amounts first, fallback to stored taxable_amount
   const taxable =
     (p.details?.length > 0
       ? p.details.reduce((s, i) => s + (i.amount || (Number(i.qty || 0) * Number(i.price || 0) - Number(i.discount || 0))), 0)
       : 0) ||
-    Number(p.taxable_amount) ||
-    0;
+    Number(p.taxable_amount) || 0;
 
   const gstRate = p.details?.[0]?.gst_rate || 18;
-
   let igst = 0, cgst = 0, sgst = 0;
   if (isIntra) {
     cgst = (taxable * gstRate) / 200;
@@ -150,7 +126,6 @@ function calcTax(p) {
     igst = (taxable * gstRate) / 100;
   }
 
-  // place of supply: vendor's state_code → state name
   const posCode = (typeof p.vendor_id === "object" ? p.vendor_id?.state_code : null) || vendorState || "";
   const STATE_NAMES = {
     "01":"Jammu & Kashmir","02":"Himachal Pradesh","03":"Punjab","04":"Chandigarh",
@@ -267,15 +242,30 @@ function DateFilter({ selected, onChange }) {
 // ─── Shared Table Styles ──────────────────────────────────────────────────────
 
 const TH_STYLE = {
-  padding: "8px 10px", fontSize: "10px", fontWeight: 600, color: "#6b7280",
-  textTransform: "uppercase", letterSpacing: "0.05em",
+  padding: "7px 5px", fontSize: "9px", fontWeight: 600, color: "#6b7280",
+  textTransform: "uppercase", letterSpacing: "0.03em",
   borderBottom: "1px solid #e5e7eb", background: "#f9fafb",
-  textAlign: "center", whiteSpace: "nowrap",
+  textAlign: "center", whiteSpace: "normal", lineHeight: "1.2",
 };
-const TD_STYLE = { padding: "10px 10px", fontSize: "12.5px", color: "#111827", textAlign: "center", borderTop: "1px solid #f3f4f6" };
-const TF_STYLE = { padding: "9px 10px", fontSize: "12px", fontWeight: 700, background: "#f9fafb", borderTop: "2px solid #e5e7eb", textAlign: "center" };
+const TH_GROUP_STYLE = {
+  ...TH_STYLE,
+  borderBottom: "1px solid #e5e7eb",
+  borderLeft: "1px solid #e5e7eb",
+  borderRight: "1px solid #e5e7eb",
+  background: "#f0f4ff",
+  color: "#1d4ed8",
+  textAlign: "center",
+};
+const TD_STYLE = { padding: "8px 5px", fontSize: "11px", color: "#111827", textAlign: "center", borderTop: "1px solid #f3f4f6", wordBreak: "break-word", lineHeight: "1.3" };
+const TF_STYLE = { padding: "8px 5px", fontSize: "11px", fontWeight: 700, background: "#f9fafb", borderTop: "2px solid #e5e7eb", textAlign: "center" };
 
 // ─── Tab: Purchase ────────────────────────────────────────────────────────────
+// Columns (13 total):
+// [1] GSTIN | [2] Vendor name |
+// -- GSTR-2B group (4): [3] Invoice no. | [4] Invoice date | [5] Place of supply | [6] Invoice value --
+// [7] Taxable value |
+// -- Amount of tax group (4): [8] IGST | [9] CGST | [10] SGST | [11] Total tax --
+// [12] Tax % | [13] ITC eligible
 
 function PurchaseTab({ data, filter }) {
   const rows = filterByDate(data, filter, "invoice_date");
@@ -303,46 +293,83 @@ function PurchaseTab({ data, filter }) {
       </div>
 
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: "9.5%" }} />{/* GSTIN */}
+            <col style={{ width: "10%"  }} />{/* Vendor name */}
+            <col style={{ width: "7%"   }} />{/* Invoice no. */}
+            <col style={{ width: "7.5%" }} />{/* Invoice date */}
+            <col style={{ width: "9%"   }} />{/* Place of supply */}
+            <col style={{ width: "8%"   }} />{/* Invoice value */}
+            <col style={{ width: "8%"   }} />{/* Taxable value */}
+            <col style={{ width: "7%"   }} />{/* IGST */}
+            <col style={{ width: "7%"   }} />{/* CGST */}
+            <col style={{ width: "7%"   }} />{/* SGST */}
+            <col style={{ width: "7.5%" }} />{/* Total tax */}
+            <col style={{ width: "5.5%" }} />{/* Tax % */}
+            <col style={{ width: "7%"   }} />{/* ITC eligible */}
+          </colgroup>
           <thead>
+            {/* ── Group header row ── 2 + 4 + 1 + 4 + 1 + 1 = 13 */}
             <tr>
               <th colSpan={2} style={TH_STYLE}></th>
-              {/* ✅ colSpan 4 to include Place of Supply */}
-              <th colSpan={4} style={{ ...TH_STYLE, textAlign: "center" }}>Invoice details from GSTR-2B</th>
-              <th style={TH_STYLE}></th>
-              <th colSpan={4} style={{ ...TH_STYLE, textAlign: "center" }}>Amount of tax</th>
-              <th style={TH_STYLE}></th>
+              <th colSpan={4} style={TH_GROUP_STYLE}>Invoice details from GSTR-2B</th>
+              <th colSpan={1} style={TH_STYLE}></th>
+              <th colSpan={4} style={TH_GROUP_STYLE}>Amount of tax</th>
+              <th colSpan={1} style={TH_STYLE}></th>
+              <th colSpan={1} style={TH_STYLE}></th>
             </tr>
+            {/* ── Column header row ── 13 columns */}
             <tr>
-              {["GSTIN","Vendor name","Invoice no.","Invoice date","Place of supply","Invoice value","Taxable value","IGST","CGST","SGST","Total tax","ITC eligible"].map((h) => (
+              {[
+                "GSTIN",
+                "Vendor name",
+                "Invoice no.",
+                "Invoice date",
+                "Place of supply",
+                "Invoice value",
+                "Taxable value",
+                "IGST",
+                "CGST",
+                "SGST",
+                "Total tax",
+                "Tax %",
+                "ITC eligible",
+              ].map((h) => (
                 <th key={h} style={TH_STYLE}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? <EmptyState colSpan={12} /> : rows.map((p, i) => {
-              const t = calcTax(p);
-              const eligible = t.gstin.length === 15;
-              return (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                  {/* ✅ t.gstin and t.vendorName from fixed calcTax */}
-                  <td style={TD_STYLE}>{t.gstin || "—"}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "left" }}>{t.vendorName}</td>
-                  <td style={TD_STYLE}>{p.supplier_invoice_no || p.order_no || "—"}</td>
-                  <td style={TD_STYLE}>{fmtDate(p.invoice_date)}</td>
-                  <td style={TD_STYLE}>{t.placeOfSupply}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(p.total_amount)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.igst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.cgst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.sgst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(t.total)}</td>
-                  <td style={TD_STYLE}>
-                    <Badge color={eligible ? "green" : "red"}>{eligible ? "Yes" : "No"}</Badge>
-                  </td>
-                </tr>
-              );
-            })}
+            {rows.length === 0 ? (
+              <EmptyState colSpan={13} />
+            ) : (
+              rows.map((p, i) => {
+                const t = calcTax(p);
+                const eligible = t.gstin.length === 15;
+                return (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+                    <td style={TD_STYLE}>{t.gstin || "—"}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "left" }}>{t.vendorName}</td>
+                    <td style={TD_STYLE}>{p.supplier_invoice_no || p.order_no || "—"}</td>
+                    <td style={TD_STYLE}>{fmtDate(p.invoice_date)}</td>
+                    <td style={TD_STYLE}>{t.placeOfSupply}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(p.total_amount)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.igst)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.cgst)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.sgst)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(t.total)}</td>
+                    <td style={{ ...TD_STYLE, color: "#1d4ed8", fontWeight: 600 }}>
+                      {t.taxable ? ((t.total / t.taxable) * 100).toFixed(2) + "%" : "0%"}
+                    </td>
+                    <td style={TD_STYLE}>
+                      <Badge color={eligible ? "green" : "red"}>{eligible ? "Yes" : "No"}</Badge>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
           {rows.length > 0 && (
             <tfoot>
@@ -354,6 +381,9 @@ function PurchaseTab({ data, filter }) {
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.cgst)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.sgst)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right", color: "#1d4ed8" }}>₹ {fmt(totals.total)}</td>
+                <td style={TF_STYLE}>
+                  {totals.taxable ? ((totals.total / totals.taxable) * 100).toFixed(2) + "%" : "0%"}
+                </td>
                 <td style={TF_STYLE}></td>
               </tr>
             </tfoot>
@@ -365,9 +395,15 @@ function PurchaseTab({ data, filter }) {
 }
 
 // ─── Tab: Purchase Return ─────────────────────────────────────────────────────
+// Columns (13 total):
+// [1] GSTIN | [2] Vendor name |
+// -- GSTR-2B group (4): [3] Return/DN no. | [4] Return/DN date | [5] Place of supply | [6] Invoice value --
+// [7] Taxable value |
+// -- Amount of tax group (4): [8] IGST | [9] CGST | [10] SGST | [11] Total tax --
+// [12] Tax % | [13] ITC eligible
 
 function PurchaseReturnTab({ data, filter }) {
-  const rows = filterByDate(data, filter, "date");
+  const rows = filterByDate(data, filter, (row) => row.date || row.debit_date);
 
   const totals = useMemo(() => {
     return rows.reduce((acc, p) => {
@@ -386,50 +422,89 @@ function PurchaseReturnTab({ data, filter }) {
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="Total returns"      value={rows.length} />
+        <KpiCard label="Total returns"       value={rows.length} />
         <KpiCard label="Total taxable value" value={`₹ ${fmt(totals.taxable)}`} />
         <KpiCard label="GST reversed"        value={`₹ ${fmt(totals.total)}`} accent />
       </div>
 
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: "9.5%" }} />{/* GSTIN */}
+            <col style={{ width: "10%"  }} />{/* Vendor name */}
+            <col style={{ width: "7.5%" }} />{/* Return/DN no. */}
+            <col style={{ width: "7.5%" }} />{/* Return/DN date */}
+            <col style={{ width: "9%"   }} />{/* Place of supply */}
+            <col style={{ width: "8%"   }} />{/* Invoice value */}
+            <col style={{ width: "8%"   }} />{/* Taxable value */}
+            <col style={{ width: "7%"   }} />{/* IGST */}
+            <col style={{ width: "7%"   }} />{/* CGST */}
+            <col style={{ width: "7%"   }} />{/* SGST */}
+            <col style={{ width: "7.5%" }} />{/* Total tax */}
+            <col style={{ width: "5.5%" }} />{/* Tax % */}
+            <col style={{ width: "6.5%" }} />{/* ITC eligible */}
+          </colgroup>
           <thead>
+            {/* ── Group header row ── 2 + 4 + 1 + 4 + 1 + 1 = 13 */}
             <tr>
               <th colSpan={2} style={TH_STYLE}></th>
-              <th colSpan={4} style={{ ...TH_STYLE, textAlign: "center" }}>Return details from GSTR-2B</th>
-              <th style={TH_STYLE}></th>
-              <th colSpan={4} style={{ ...TH_STYLE, textAlign: "center" }}>Amount of tax</th>
-              <th style={TH_STYLE}></th>
+              <th colSpan={4} style={TH_GROUP_STYLE}>Return / Debit Note details from GSTR-2B</th>
+              <th colSpan={1} style={TH_STYLE}></th>
+              <th colSpan={4} style={TH_GROUP_STYLE}>Amount of tax</th>
+              <th colSpan={1} style={TH_STYLE}></th>
+              <th colSpan={1} style={TH_STYLE}></th>
             </tr>
+            {/* ── Column header row ── 13 columns */}
             <tr>
-              {["GSTIN","Vendor name","Return no.","Return date","Place of supply","Invoice value","Taxable value","IGST","CGST","SGST","Total tax","ITC eligible"].map((h) => (
+              {[
+                "GSTIN",
+                "Vendor name",
+                "Return / Debit Note no.",
+                "Return / Debit Note date",
+                "Place of supply",
+                "Invoice value",
+                "Taxable value",
+                "IGST",
+                "CGST",
+                "SGST",
+                "Total tax",
+                "Tax %",
+                "ITC eligible",
+              ].map((h) => (
                 <th key={h} style={TH_STYLE}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? <EmptyState colSpan={12} /> : rows.map((p, i) => {
-              const t = calcTax(p);
-              const eligible = t.gstin.length === 15;
-              return (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                  <td style={TD_STYLE}>{t.gstin || "—"}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "left" }}>{t.vendorName}</td>
-                  <td style={TD_STYLE}>{p.return_no || "—"}</td>
-                  <td style={TD_STYLE}>{fmtDate(p.date)}</td>
-                  <td style={TD_STYLE}>{t.placeOfSupply}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(p.total_amount)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.igst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.cgst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.sgst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(t.total)}</td>
-                  <td style={TD_STYLE}>
-                    <Badge color={eligible ? "green" : "red"}>{eligible ? "Yes" : "No"}</Badge>
-                  </td>
-                </tr>
-              );
-            })}
+            {rows.length === 0 ? (
+              <EmptyState colSpan={13} />
+            ) : (
+              rows.map((p, i) => {
+                const t = calcTax(p);
+                const eligible = t.gstin.length === 15;
+                return (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+                    <td style={TD_STYLE}>{t.gstin || "—"}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "left" }}>{t.vendorName}</td>
+                    <td style={TD_STYLE}>{p.return_no || p.debit_note_no || "—"}</td>
+                    <td style={TD_STYLE}>{fmtDate(p.date || p.debit_date)}</td>
+                    <td style={TD_STYLE}>{t.placeOfSupply}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(p.total_amount)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.igst)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.cgst)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.sgst)}</td>
+                    <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(t.total)}</td>
+                    <td style={{ ...TD_STYLE, color: "#1d4ed8", fontWeight: 600 }}>
+                      {t.taxable ? ((t.total / t.taxable) * 100).toFixed(2) + "%" : "0%"}
+                    </td>
+                    <td style={TD_STYLE}>
+                      <Badge color={eligible ? "green" : "red"}>{eligible ? "Yes" : "No"}</Badge>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
           {rows.length > 0 && (
             <tfoot>
@@ -441,6 +516,9 @@ function PurchaseReturnTab({ data, filter }) {
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.cgst)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.sgst)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right", color: "#1d4ed8" }}>₹ {fmt(totals.total)}</td>
+                <td style={TF_STYLE}>
+                  {totals.taxable ? ((totals.total / totals.taxable) * 100).toFixed(2) + "%" : "0%"}
+                </td>
                 <td style={TF_STYLE}></td>
               </tr>
             </tfoot>
@@ -459,7 +537,6 @@ function PurchaseSummaryTab({ data, filter }) {
   const slabs = useMemo(() => {
     const map = {};
     rows.forEach((p) => {
-      // ✅ use extractVendorInfo instead of p.vendor_id?.gst directly
       const { gstin } = extractVendorInfo(p);
       const vendorState = gstin.substring(0, 2);
       const isIntra     = vendorState === BUYER_STATE;
@@ -491,19 +568,7 @@ function PurchaseSummaryTab({ data, filter }) {
     );
   }, [rows]);
 
-  const vendorMap = useMemo(() => {
-    const map = {};
-    rows.forEach((p) => {
-      const key              = (typeof p.vendor_id === "object" ? p.vendor_id?._id : p.vendor_id) || "unknown";
-      const t                = calcTax(p); // ✅ vendorName + gstin from fixed helper
-      if (!map[key]) map[key] = { name: t.vendorName, gstin: t.gstin, count: 0, taxable: 0, gst: 0, value: 0 };
-      map[key].count   += 1;
-      map[key].taxable += t.taxable;
-      map[key].gst     += t.total;
-      map[key].value   += Number(p.total_amount) || 0;
-    });
-    return Object.values(map).sort((a, b) => b.value - a.value);
-  }, [rows]);
+
 
   const totals = useMemo(() => slabs.reduce(
     (acc, r) => ({ taxable: acc.taxable + r.taxable, igst: acc.igst + r.igst, cgst: acc.cgst + r.cgst, sgst: acc.sgst + r.sgst }),
@@ -523,7 +588,6 @@ function PurchaseSummaryTab({ data, filter }) {
         <KpiCard label="Total invoices"        value={rows.length} />
       </div>
 
-      {/* Tax-wise breakdown */}
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
         <div style={{ padding: "9px 16px", fontSize: "10.5px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.07em", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
           Tax-wise purchase breakup
@@ -569,47 +633,7 @@ function PurchaseSummaryTab({ data, filter }) {
         )}
       </div>
 
-      {/* Vendor-wise */}
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-        <div style={{ padding: "9px 16px", fontSize: "10.5px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.07em", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-          Vendor-wise summary
-        </div>
-        {vendorMap.length === 0 ? (
-          <div style={{ padding: "48px 0", textAlign: "center", color: "#9ca3af", fontSize: "13px" }}>No data</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
-            <thead>
-              <tr>
-                {["Vendor name","GSTIN","No. of invoices","Taxable value","Total GST","Invoice value"].map((h) => (
-                  <th key={h} style={TH_STYLE}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {vendorMap.map((v, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                  <td style={{ ...TD_STYLE, textAlign: "left", fontWeight: 500 }}>{v.name}</td>
-                  {/* ✅ v.gstin now populated from extractVendorInfo */}
-                  <td style={TD_STYLE}>{v.gstin || "—"}</td>
-                  <td style={TD_STYLE}>{v.count}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(v.taxable)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(v.gst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(v.value)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={2} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Total</td>
-                <td style={TF_STYLE}>{vendorMap.reduce((a, v) => a + v.count, 0)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(vendorMap.reduce((a, v) => a + v.taxable, 0))}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(vendorMap.reduce((a, v) => a + v.gst, 0))}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#1d4ed8" }}>₹ {fmt(vendorMap.reduce((a, v) => a + v.value, 0))}</td>
-              </tr>
-            </tfoot>
-          </table>
-        )}
-      </div>
+   
     </>
   );
 }
@@ -618,95 +642,138 @@ function PurchaseSummaryTab({ data, filter }) {
 
 function ITCSummaryTab({ purchases, returns, filter }) {
   const filteredPurchases = filterByDate(purchases, filter, "invoice_date");
-  const filteredReturns   = filterByDate(returns,   filter, "date");
+  const filteredReturns   = filterByDate(returns,   filter, (r) => r.date || r.debit_date);
 
-  const itcData = useMemo(() => {
-    const purchaseRows = filteredPurchases.map((p) => {
+  // ── Aggregate from purchases ──────────────────────────────────────────────
+  const agg = useMemo(() => {
+    let eligIgst = 0, eligCgst = 0, eligSgst = 0;
+    let ineligIgst = 0, ineligCgst = 0, ineligSgst = 0;
+    let revIgst = 0, revCgst = 0, revSgst = 0;
+
+    filteredPurchases.forEach((p) => {
       const t    = calcTax(p);
       const elig = t.gstin.length === 15;
-      return {
-        key:           p._id || p.order_no || Math.random(),
-        vendor:        t.vendorName, // ✅ fixed
-        invoiceNo:     p.supplier_invoice_no || p.order_no || "—",
-        date:          fmtDate(p.invoice_date),
-        eligibleITC:   elig ? t.total : 0,
-        ineligibleITC: elig ? 0 : t.total,
-        reverseITC:    0,
-      };
+      if (elig) {
+        eligIgst += t.igst; eligCgst += t.cgst; eligSgst += t.sgst;
+      } else {
+        ineligIgst += t.igst; ineligCgst += t.cgst; ineligSgst += t.sgst;
+      }
     });
 
-    const returnRows = filteredReturns.map((p) => {
+    filteredReturns.forEach((p) => {
       const t    = calcTax(p);
       const elig = t.gstin.length === 15;
-      return {
-        key:           p._id || p.return_no || Math.random(),
-        vendor:        t.vendorName, // ✅ fixed
-        invoiceNo:     p.return_no || "—",
-        date:          fmtDate(p.date),
-        eligibleITC:   0,
-        ineligibleITC: 0,
-        reverseITC:    elig ? t.total : 0,
-      };
+      if (elig) {
+        revIgst += t.igst; revCgst += t.cgst; revSgst += t.sgst;
+      }
     });
 
-    const allRows         = [...purchaseRows, ...returnRows];
-    const totalEligible   = allRows.reduce((s, r) => s + r.eligibleITC,   0);
-    const totalIneligible = allRows.reduce((s, r) => s + r.ineligibleITC, 0);
-    const totalReversed   = allRows.reduce((s, r) => s + r.reverseITC,    0);
-    const netITC          = totalEligible - totalReversed;
+    const netIgst = eligIgst - revIgst;
+    const netCgst = eligCgst - revCgst;
+    const netSgst = eligSgst - revSgst;
 
-    return { allRows, totalEligible, totalIneligible, totalReversed, netITC };
+    return {
+      eligIgst, eligCgst, eligSgst,
+      ineligIgst, ineligCgst, ineligSgst,
+      revIgst, revCgst, revSgst,
+      netIgst, netCgst, netSgst,
+      totalElig:   eligIgst + eligCgst + eligSgst,
+      totalInelig: ineligIgst + ineligCgst + ineligSgst,
+      totalRev:    revIgst + revCgst + revSgst,
+      totalNet:    netIgst + netCgst + netSgst,
+    };
   }, [filteredPurchases, filteredReturns]);
+
+  // ── Styles ────────────────────────────────────────────────────────────────
+  const sectionHeader = {
+    padding: "10px 16px", fontSize: "12px", fontWeight: 700,
+    color: "#1e3a8a", background: "#eff6ff",
+    borderTop: "1px solid #e5e7eb", borderBottom: "1px solid #e5e7eb",
+  };
+  const detailLabel = {
+    padding: "11px 16px", fontSize: "12.5px", color: "#374151",
+    borderBottom: "1px solid #f3f4f6", background: "#fff",
+  };
+  const numCell = (color = "#111827") => ({
+    padding: "11px 16px", fontSize: "12.5px", fontWeight: 600,
+    textAlign: "right", color,
+    borderBottom: "1px solid #f3f4f6", background: "#fff",
+  });
+  const totalLabel = {
+    padding: "11px 16px", fontSize: "12.5px", fontWeight: 700,
+    color: "#111827", background: "#f9fafb",
+    borderTop: "2px solid #e5e7eb",
+  };
+  const totalNum = (color = "#1d4ed8") => ({
+    padding: "11px 16px", fontSize: "12.5px", fontWeight: 700,
+    textAlign: "right", color,
+    background: "#f9fafb", borderTop: "2px solid #e5e7eb",
+  });
+
+  const Row = ({ label, igst, cgst, sgst, isTotal, color }) => (
+    <tr>
+      <td style={isTotal ? totalLabel : detailLabel}>{label}</td>
+      <td style={isTotal ? totalNum(color) : numCell(color)}>₹ {fmt(igst)}</td>
+      <td style={isTotal ? totalNum(color) : numCell(color)}>₹ {fmt(cgst)}</td>
+      <td style={isTotal ? totalNum(color) : numCell(color)}>₹ {fmt(sgst)}</td>
+      <td style={isTotal ? totalNum(color) : numCell(color)}>₹ {fmt(igst + cgst + sgst)}</td>
+    </tr>
+  );
 
   return (
     <>
+      {/* KPI strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="Eligible ITC"   value={`₹ ${fmt(itcData.totalEligible)}`}   accent />
-        <KpiCard label="Ineligible ITC" value={`₹ ${fmt(itcData.totalIneligible)}`} danger />
-        <KpiCard label="Reverse ITC"    value={`₹ ${fmt(itcData.totalReversed)}`}   danger />
-        <KpiCard label="Net ITC"        value={`₹ ${fmt(itcData.netITC)}`}          accent />
+        <KpiCard label="Eligible ITC"   value={`₹ ${fmt(agg.totalElig)}`}   accent />
+        <KpiCard label="Ineligible ITC" value={`₹ ${fmt(agg.totalInelig)}`} danger />
+        <KpiCard label="Reversed ITC"   value={`₹ ${fmt(agg.totalRev)}`}    danger />
+        <KpiCard label="Net ITC"        value={`₹ ${fmt(agg.totalNet)}`}    accent />
       </div>
 
+      {/* GSTR-3B style table */}
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
           <thead>
-            <tr>
-              {["Vendor name","Invoice / Return no.","Date","Eligible ITC","Ineligible ITC","Reverse ITC","Net ITC"].map((h) => (
-                <th key={h} style={TH_STYLE}>{h}</th>
-              ))}
+            <tr style={{ background: "#f9fafb" }}>
+              <th style={{ ...TH_STYLE, textAlign: "left", padding: "10px 16px", width: "45%" }}>Details</th>
+              <th style={TH_STYLE}>Integrated Tax (IGST)</th>
+              <th style={TH_STYLE}>Central Tax (CGST)</th>
+              <th style={TH_STYLE}>State/UT Tax (SGST)</th>
+              <th style={TH_STYLE}>Total</th>
             </tr>
           </thead>
           <tbody>
-            {itcData.allRows.length === 0 ? (
-              <EmptyState colSpan={7} />
-            ) : (
-              itcData.allRows.map((r, i) => {
-                const net = r.eligibleITC - r.reverseITC;
-                return (
-                  <tr key={r.key} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                    <td style={{ ...TD_STYLE, textAlign: "left", fontWeight: 500 }}>{r.vendor}</td>
-                    <td style={TD_STYLE}>{r.invoiceNo}</td>
-                    <td style={TD_STYLE}>{r.date}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right", color: r.eligibleITC > 0 ? "#15803d" : "#9ca3af" }}>₹ {fmt(r.eligibleITC)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right", color: r.ineligibleITC > 0 ? "#b91c1c" : "#9ca3af" }}>₹ {fmt(r.ineligibleITC)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right", color: r.reverseITC > 0 ? "#b91c1c" : "#9ca3af" }}>₹ {fmt(r.reverseITC)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700, color: net >= 0 ? "#1d4ed8" : "#b91c1c" }}>₹ {fmt(net)}</td>
-                  </tr>
-                );
-              })
-            )}
+            {/* Section A — ITC Available */}
+            <tr><td colSpan={5} style={sectionHeader}>(A) ITC Available (Whether in full or in part)</td></tr>
+            <Row label="(1) Import of goods"                                             igst={0}              cgst={0}              sgst={0} />
+            <Row label="(2) Import of services"                                          igst={0}              cgst={0}              sgst={0} />
+            <Row label="(3) Inward supplies liable for reverse charge (other than 1 & 2)" igst={0}             cgst={0}              sgst={0} />
+            <Row label="(4) Inward supplies from ISD"                                    igst={0}              cgst={0}              sgst={0} />
+            <Row label="(5) All other ITC (from purchases)"                              igst={agg.eligIgst}   cgst={agg.eligCgst}   sgst={agg.eligSgst} />
+
+            {/* Section B — ITC Reversed */}
+            <tr><td colSpan={5} style={sectionHeader}>(B) ITC Reversed</td></tr>
+            <Row label="(1) As per rules 42 & 43 of CGST Rules"                          igst={0}              cgst={0}              sgst={0} />
+            <Row label="(2) Others (purchase returns / debit notes)"                     igst={agg.revIgst}    cgst={agg.revCgst}    sgst={agg.revSgst} />
+
+            {/* Section C — Net ITC */}
+            <tr><td colSpan={5} style={sectionHeader}>(C) Net ITC Available (A) – (B)</td></tr>
+            <Row label="Net eligible ITC"                                                igst={agg.netIgst}    cgst={agg.netCgst}    sgst={agg.netSgst}  color={agg.totalNet >= 0 ? "#15803d" : "#b91c1c"} />
+
+            {/* Section D — Ineligible */}
+            <tr><td colSpan={5} style={sectionHeader}>(D) Ineligible ITC</td></tr>
+            <Row label="(1) As per section 17(5)"                                        igst={agg.ineligIgst} cgst={agg.ineligCgst} sgst={agg.ineligSgst} color="#b91c1c" />
+            <Row label="(5) Others"                                                       igst={0}              cgst={0}              sgst={0} />
+
+            {/* Grand total */}
+            <Row
+              label="Total ITC (Eligible + Ineligible)"
+              igst={agg.eligIgst + agg.ineligIgst}
+              cgst={agg.eligCgst + agg.ineligCgst}
+              sgst={agg.eligSgst + agg.ineligSgst}
+              isTotal color="#1d4ed8"
+            />
           </tbody>
-          {itcData.allRows.length > 0 && (
-            <tfoot>
-              <tr>
-                <td colSpan={3} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Totals</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#15803d" }}>₹ {fmt(itcData.totalEligible)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#b91c1c" }}>₹ {fmt(itcData.totalIneligible)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#b91c1c" }}>₹ {fmt(itcData.totalReversed)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#1d4ed8" }}>₹ {fmt(itcData.netITC)}</td>
-              </tr>
-            </tfoot>
-          )}
         </table>
       </div>
     </>
@@ -720,6 +787,7 @@ export default function GSTR2Reports() {
   const [selectedFilter,  setSelectedFilter]  = useState("This Month");
   const [purchases,       setPurchases]       = useState([]);
   const [purchaseReturns, setPurchaseReturns] = useState([]);
+  const [debitNotes,      setDebitNotes]      = useState([]);
   const [loading,         setLoading]         = useState(false);
 
   useEffect(() => {
@@ -728,12 +796,21 @@ export default function GSTR2Reports() {
       try {
         const res = await axios.get("http://localhost:8000/api/purchase");
         if (res.data.success) {
-          // ✅ debug: log first record so you can see exact field names from your backend
           console.log("PURCHASE RECORD SAMPLE 👉", res.data.data?.[0]);
           setPurchases(res.data.data);
         }
       } catch (err) { console.error("Purchase fetch error:", err); }
       finally { setLoading(false); }
+    };
+    load();
+  }, []);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await axios.get("http://localhost:8000/api/debit-note");
+        if (res.data.success) setDebitNotes(res.data.data);
+      } catch (err) { console.error("Debit note fetch error:", err); }
     };
     load();
   }, []);
@@ -750,27 +827,30 @@ export default function GSTR2Reports() {
 
   const exportToExcel = () => {
     const sourceData =
-      activeTab === "Purchase"        ? filterByDate(purchases,       selectedFilter, "invoice_date") :
-      activeTab === "Purchase Return" ? filterByDate(purchaseReturns, selectedFilter, "date")         :
-      filterByDate(purchases, selectedFilter, "invoice_date");
+      activeTab === "Purchase" ? filterByDate(purchases, selectedFilter, "invoice_date") :
+      activeTab === "Purchase Return / Debit Note"
+        ? filterByDate([...purchaseReturns, ...debitNotes], selectedFilter, (row) => row.date || row.debit_date)
+        : filterByDate(purchases, selectedFilter, "invoice_date");
 
     if (!sourceData.length) return;
 
     const excelData = sourceData.map((p) => {
       const t = calcTax(p);
       return {
-        GSTIN:           t.gstin || "—",
-        "Vendor Name":   t.vendorName,
-        "Invoice No":    activeTab === "Purchase Return" ? (p.return_no || "—") : (p.supplier_invoice_no || p.order_no || "—"),
-        "Invoice Date":  fmtDate(activeTab === "Purchase Return" ? p.date : p.invoice_date),
+        GSTIN:             t.gstin || "—",
+        "Vendor Name":     t.vendorName,
+        "Invoice No":      activeTab === "Purchase Return / Debit Note"
+                             ? (p.return_no || p.debit_note_no || "—")
+                             : (p.supplier_invoice_no || p.order_no || "—"),
+        "Invoice Date":    fmtDate(activeTab === "Purchase Return / Debit Note" ? (p.date || p.debit_date) : p.invoice_date),
         "Place of Supply": t.placeOfSupply,
-        "Invoice Value": p.total_amount,
-        "Taxable Value": t.taxable,
-        "IGST":          parseFloat(t.igst.toFixed(2)),
-        "CGST":          parseFloat(t.cgst.toFixed(2)),
-        "SGST":          parseFloat(t.sgst.toFixed(2)),
-        "Total Tax":     parseFloat(t.total.toFixed(2)),
-        "ITC Eligible":  t.gstin.length === 15 ? "Yes" : "No",
+        "Invoice Value":   p.total_amount,
+        "Taxable Value":   t.taxable,
+        "IGST":            parseFloat(t.igst.toFixed(2)),
+        "CGST":            parseFloat(t.cgst.toFixed(2)),
+        "SGST":            parseFloat(t.sgst.toFixed(2)),
+        "Total Tax":       parseFloat(t.total.toFixed(2)),
+        "ITC Eligible":    t.gstin.length === 15 ? "Yes" : "No",
       };
     });
 
@@ -785,13 +865,13 @@ export default function GSTR2Reports() {
   useEffect(() => { window.exportGSTR2Excel = exportToExcel; }, [purchases, purchaseReturns, selectedFilter, activeTab]);
 
   return (
-    <div style={{ minHeight: "100vh", padding: "24px", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-
+    <div style={{ minHeight: "100vh", padding: "16px 12px", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 12 }}>
         <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 10, padding: 4, gap: 3 }}>
           {TABS.map((tab) => (
             <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{ padding: "6px 16px", borderRadius: 7, fontSize: "12.5px", fontWeight: 500, border: "none", cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap", background: activeTab === tab ? "#1e3a8a" : "transparent", color: activeTab === tab ? "#fff" : "#6b7280" }}>
+              style={{ padding: "6px 16px", borderRadius: 7, fontSize: "12.5px", fontWeight: 500, border: "none", cursor: "pointer", transition: "all 0.15s", whiteSpace: "normal", lineHeight: "1.2",
+                background: activeTab === tab ? "#1e3a8a" : "transparent", color: activeTab === tab ? "#fff" : "#6b7280" }}>
               {tab}
             </button>
           ))}
@@ -811,10 +891,14 @@ export default function GSTR2Reports() {
 
       {!loading && (
         <>
-          {activeTab === "Purchase"         && <PurchaseTab        data={purchases}       filter={selectedFilter} />}
-          {activeTab === "Purchase Return"  && <PurchaseReturnTab  data={purchaseReturns} filter={selectedFilter} />}
-          {activeTab === "Purchase Summary" && <PurchaseSummaryTab data={purchases}       filter={selectedFilter} />}
-          {activeTab === "ITC Summary"      && <ITCSummaryTab purchases={purchases} returns={purchaseReturns} filter={selectedFilter} />}
+          {activeTab === "Purchase" &&
+            <PurchaseTab data={purchases} filter={selectedFilter} />}
+          {activeTab === "Purchase Return / Debit Note" &&
+            <PurchaseReturnTab data={[...purchaseReturns, ...debitNotes]} filter={selectedFilter} />}
+          {activeTab === "Purchase Summary" &&
+            <PurchaseSummaryTab data={purchases} filter={selectedFilter} />}
+          {activeTab === "ITC Summary" &&
+            <ITCSummaryTab purchases={purchases} returns={[...purchaseReturns, ...debitNotes]} filter={selectedFilter} />}
         </>
       )}
     </div>

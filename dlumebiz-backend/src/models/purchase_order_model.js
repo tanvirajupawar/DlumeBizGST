@@ -43,6 +43,18 @@ const purchaseOrderSchema = new Schema({
     required: true
   },
 
+  // ✅ ADD THESE TWO FIELDS
+  balance_amount: {
+    type: Number,
+    default: null   // null = not yet set (will fall back to total_amount)
+  },
+
+  payment_status: {
+    type: String,
+    enum: ["Unpaid", "Partial", "Paid"],
+    default: "Unpaid"
+  },
+
   paid_amount: {
     type: Number,
     default: 0
@@ -99,13 +111,10 @@ purchaseOrderSchema.pre("save", async function (next) {
     let nextNumber = 1;
 
     if (last && last.order_no) {
-
       const match = last.order_no.match(/PO-(\d+)/);
-
       if (match && match[1]) {
         nextNumber = parseInt(match[1], 10) + 1;
       }
-
     }
 
     this.order_no = `PO-${String(nextNumber).padStart(5, "0")}`;

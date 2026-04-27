@@ -8,7 +8,7 @@ import Customers from "../pages/Customers/Customers";
 import InvoiceDetail from "../pages/Invoices/InvoiceDetail";
 import Profile from "../pages/Profile/Profile";
 import CustomerList from "../pages/Customers/CustomerList";
-import CustomerProfile from "../pages/Customers/Customerprofile";
+import Customerdetails from "../pages/Customers/Customerdetails";
 import VendorList from "../pages/Vendors/VendorList";
 import Vendors from "../pages/Vendors/Vendors";
 import PurchaseInvoice from "../pages/Purchase/PurchaseInvoice";
@@ -32,6 +32,7 @@ import SalesReturnList from "../pages/Sales/Salesreturnlist";
 import CreateSalesReturn from "../pages/Sales/Createsalesreturn";
 import CreditNoteList from "../pages/Sales/Creditnotelist";
 import CreateCreditNote from "../pages/Sales/CreateCreditNote";
+import GSTR1Reports from "../pages/Reports/Gstr1reports";
 
 
 
@@ -52,7 +53,7 @@ const AppRoutes = () => {
           <Route path="invoice/:id" element={<InvoiceDetail />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/customer-list" element={<CustomerList />} />
-          <Route path="/customers/:id" element={<CustomerProfile />} />
+          <Route path="/customers/:id" element={<Customerdetails />} />
        <Route path="/vendor-list" element={<VendorList />} />
 <Route path="/vendors" element={<Vendors />} />
 <Route path="/vendors/:id" element={<VendorDetails />} />
@@ -77,6 +78,7 @@ const AppRoutes = () => {
 <Route path="/sales-return/new" element={<CreateSalesReturn />} />
 <Route path="/credit-note" element={<CreditNoteList />} />
 <Route path="/credit-note/new" element={<CreateCreditNote />} />
+<Route path="/reports/gstr1-sales" element={<GSTR1Reports />} />
         </Route>
 
       </Route>

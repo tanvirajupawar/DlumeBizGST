@@ -79,14 +79,7 @@ function ItemModal({ editItem, form, setForm, onClose, onSave, onDelete }) {
             </Field>
 
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Category">
-                <input
-                  type="text"
-                  value={form.category}
-                  onChange={(e) => setForm(prev => ({ ...prev, category: e.target.value }))}
-                  className={inputCls}
-                />
-              </Field>
+           
               <Field label="Type">
                 <input
                   type="text"
@@ -95,18 +88,7 @@ function ItemModal({ editItem, form, setForm, onClose, onSave, onDelete }) {
                   className={inputCls}
                 />
               </Field>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Item Code">
-                <input
-                  type="text"
-                  value={form.code}
-                  onChange={(e) => setForm(prev => ({ ...prev, code: e.target.value }))}
-                  className={inputCls}
-                />
-              </Field>
-              <Field label="HSN No">
+               <Field label="HSN No">
                 <input
                   type="text"
                   value={form.hsn}
@@ -116,6 +98,10 @@ function ItemModal({ editItem, form, setForm, onClose, onSave, onDelete }) {
               </Field>
             </div>
 
+         
+             
+             
+          
             <div className="grid grid-cols-2 gap-4">
               <Field label="Size / Pack">
                 <input
@@ -283,11 +269,13 @@ export default function ItemList() {
         const addQty = Number(form.addStock || 0);
         const subQty = Number(form.subtractStock || 0);
 
-        await axios.put(`http://localhost:8000/api/product/${editItem.id}`, {
-          ...payload,
-          stock_in:  addQty,
-          stock_out: subQty,
-        });
+
+
+await axios.put(`http://localhost:8000/api/product/${editItem.id}`, {
+  ...payload,
+  stock_in: addQty,
+  stock_out: subQty,
+});
       }
 
       await fetchItems();

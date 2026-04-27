@@ -388,7 +388,7 @@ product.stock_in = (product.stock_in || 0) + qty;
 await StockManagementModel.create({
   product_id: d.product_id,
   company_id: updetedOrder.company_id,
-  in: qty,                 // ✅ FIX
+  in: qty,               
   out: 0,
   total_stock: qty,
 });

@@ -149,7 +149,8 @@ const PurchaseReturnList = () => {
      const formatted = res.data.data.map((r) => ({
   id: r._id,
   returnNo: r.return_no,
-  partyName: r.vendor_id?.vendor_name || r.vendor_id?.company_name || "Unknown Vendor",
+companyName: r.vendor_id?.company_name || "",
+customerName: r.vendor_id?.vendor_name || "",
   invoiceNo: r.purchase_id?.supplier_invoice_no || "-",
   date: new Date(r.date).toLocaleDateString("en-GB"),
   amount: r.total_amount || 0,
@@ -186,7 +187,16 @@ const columns = [
     label: "Purchase Return No",
     render: (v) => <span className="font-mono">{v}</span>,
   },
-  { key: "partyName", label: "Party Name" },
+{
+  key: "companyName",
+  label: "Company Name",
+  render: (v) => v || "—",
+},
+{
+  key: "customerName",
+  label: "Customer Name",
+  render: (v) => v || "—",
+},
   { key: "invoiceNo", label: "Invoice No" },
   {
     key: "amount",

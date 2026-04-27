@@ -33,6 +33,8 @@ const purchaseReturnRouter = require("./routes/purchaseReturnRoutes");
 const debitNoteRouter = require("./routes/debit_note_route");
 const salesReturnRoutes = require("./routes/salesReturnRoutes");
 const creditNoteRoutes = require("./routes/creditNoteRoutes");
+const paymentOutRoutes = require("./routes/paymentOutRoutes");
+const vendorPaymentRoutes = require("./routes/vendorPayment.routes");
 
 
 
@@ -100,7 +102,9 @@ app.use(
    purchaseReturnRouter,
    debitNoteRouter,
    salesReturnRoutes,
-   creditNoteRoutes
+   creditNoteRoutes,
+   paymentOutRoutes,
+   vendorPaymentRoutes
 );
 
 app.use(

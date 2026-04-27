@@ -669,12 +669,24 @@ const itcEligible = vendorForm.gstin?.trim().length === 15 ? "Eligible" : "Not E
       total_tax: totalTax, other_charges: Number(otherCharges)||0,
       round_off: roundOff, total_amount: grandTotal,
       amount_paid: Number(amountPaid), payment_mode: paymentMode, payment_ref: paymentRef,
-      status: Number(amountPaid) >= grandTotal ? "Paid" : "Pending",
+    status: Number(amountPaid) >= grandTotal ? "Paid" : "Pending",
+    balance: grandTotal - Number(amountPaid),
     };
     try {
       const res = isEdit
         ? await axios.put(`http://localhost:8000/api/purchase/${id}`, payload)
         : await axios.post("http://localhost:8000/api/create", payload);
+if (Number(amountPaid) > 0 && selectedVendor?._id) {
+  await axios.post("http://localhost:8000/api/payment-out", {
+    vendor_id: selectedVendor._id,
+    purchase_id: res.data.data?._id || id,
+    amount: Number(amountPaid),
+    payment_mode: paymentMode,
+    remark: paymentRef || ""
+  });
+
+  window.dispatchEvent(new Event("paymentUpdated"));
+}
       if (res.data.success) { alert("Purchase Saved Successfully"); navigate("/purchase-invoice-list"); }
       else alert(res.data.message || "Error saving");
     } catch (err) { console.error(err); alert("Server Error"); }
