@@ -17,15 +17,8 @@ const vendorSchema = new Schema({
     default: "",
   },
 
-  gst: {
-    type: String,
-    default: "",
-  },
-
-  pan: {
-    type: String,
-    default: "",
-  },
+ gstin: { type: String, default: "" },
+pan_number: { type: String, default: "" },
 
   email: {
     type: String,
@@ -76,6 +69,27 @@ const vendorSchema = new Schema({
     type: String,
     default: "",
   },
+
+
+  shipping_address_line_1: {
+  type: String,
+  default: "",
+},
+
+shipping_city: {
+  type: String,
+  default: "",
+},
+
+shipping_state: {
+  type: String,
+  default: "",
+},
+
+shipping_pincode: {
+  type: String,
+  default: "",
+},
 
 opening_balance: {
   type: Number,

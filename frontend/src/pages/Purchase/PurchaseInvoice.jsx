@@ -533,8 +533,28 @@ const itcEligible = vendorForm.gstin?.trim().length === 15 ? "Eligible" : "Not E
   const [extraDiscount, setExtraDiscount] = useState(0);
   const [itemList,      setItemList]      = useState([]);
 
-  const updateItem = (i, f, v) => { const u = [...items]; u[i][f] = v; setItems(u); };
-  const removeItem = (i) => items.length > 1 && setItems(items.filter((_, idx) => idx !== i));
+const updateItem = (index, field, value) => {
+  setItems(prev => {
+    const updated = [...prev];
+
+    const item = {
+      ...updated[index],
+      [field]: value,
+    };
+
+    // 🔥 FORCE NUMBER TYPES (IMPORTANT)
+    item.qty = Number(item.qty) || 0;
+    item.purchasePrice = Number(item.purchasePrice) || 0;
+    item.discount = Number(item.discount) || 0;
+    item.gstRate = Number(item.gstRate) || 0;
+
+    updated[index] = item;
+
+    return updated;
+  });
+};
+
+const removeItem = (i) => items.length > 1 && setItems(items.filter((_, idx) => idx !== i));
   const addItems   = (newItems) => setItems(prev => [...prev, ...newItems]);
 
   // ── Tax calculations ──────────────────────────────────────────────────────

@@ -35,12 +35,28 @@ const fetchCustomers = async () => {
     const res = await axios.get("http://localhost:8000/api/customers");
 
     if (res.data.success) {
-      setCustomers(res.data.data);
+      const customersWithOutstanding = await Promise.all(
+        res.data.data.map(async (c) => {
+          const outstanding = await getOutstanding(c._id);
+
+          return {
+            ...c,
+            computed_outstanding: outstanding,
+          };
+        })
+      );
+
+      setCustomers(customersWithOutstanding);
     }
   } catch (err) {
     console.error(err);
   }
 };
+
+
+
+
+
 
   const [showPayModal, setShowPayModal] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -52,14 +68,40 @@ const fetchCustomers = async () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [savedPayment, setSavedPayment] = useState(null);
 
+  const fetchCustomerInvoices = async (customerId) => {
+  try {
+    const res = await axios.get(
+      `http://localhost:8000/api/sales?customer_id=${customerId}`
+    );
+    return res.data.data || [];
+  } catch (err) {
+    console.error("Invoice fetch error:", err);
+    return [];
+  }
+};
+
 const handleSavePayment = async () => {
   try {
-    const res = await axios.post("http://localhost:8000/api/payment-in", {
-      customer_id: selectedCustomer.id,
-      amount: Number(paymentAmount),
-      payment_mode: paymentMode,
-      remark,
-    });
+const payload = {
+  customer_id: selectedCustomer.id,
+  amount: Number(paymentAmount),
+  payment_mode: paymentMode,
+  remark,
+
+  invoice_ids: selectedCustomer.invoices
+    ?.filter(inv => {
+      const total = Number(inv.total_amount || 0);
+      const paid = Number(inv.paid_amount || 0);
+
+      return total - paid > 0;
+    })
+    .map(inv => inv._id) || []
+};
+
+const res = await axios.post(
+  "http://localhost:8000/api/payment-in",
+  payload
+);
 
     if (res.data.success) {
       const today = new Date().toLocaleDateString("en-IN", {
@@ -78,12 +120,16 @@ const handleSavePayment = async () => {
           contact_no_1: selectedCustomer?.phone || "",
         },
       });
+window.dispatchEvent(new Event("paymentUpdated"));
 
-      setShowPayModal(false);
-      setShowSuccess(true);
+setShowPayModal(false);
+setShowSuccess(true);
 
-      // 🔥 refresh list
-      fetchCustomers();
+fetchCustomers();
+
+// ✅ ADD THIS
+setPaymentAmount("");
+setRemark("");
     }
 
   } catch (err) {
@@ -100,6 +146,48 @@ const handleSavePayment = async () => {
     setRemark("");
     setSelectedCustomer(null);
   };
+
+  const getOutstanding = async (customerId) => {
+  try {
+    const [salesRes, returnRes, creditRes, paymentRes] = await Promise.all([
+      axios.get(`http://localhost:8000/api/sales?customer_id=${customerId}`),
+      axios.get(`http://localhost:8000/api/sales-return?customer_id=${customerId}`),
+      axios.get(`http://localhost:8000/api/credit-note?customer_id=${customerId}`),
+      axios.get(`http://localhost:8000/api/payment-in?customer_id=${customerId}`)
+    ]);
+
+    const sales = salesRes.data.data || [];
+    const returns = returnRes.data.data || [];
+    const credits = creditRes.data.data || [];
+    const payments = paymentRes.data.data || [];
+
+    let balance = 0;
+
+    // debit (sales)
+    sales.forEach(s => {
+      balance += Number(s.total_amount || 0);
+    });
+
+    // credit (returns + credit notes + payments)
+    returns.forEach(r => {
+      balance -= Number(r.total_amount || 0);
+    });
+
+    credits.forEach(c => {
+      balance -= Number(c.amount || c.total_amount || 0);
+    });
+
+    payments.forEach(p => {
+      balance -= Number(p.amount || 0);
+    });
+
+    return balance;
+
+  } catch (err) {
+    console.error("Outstanding calc error:", err);
+    return 0;
+  }
+};
 
   // ✅ Show full-screen success page
   if (showSuccess && savedPayment) {
@@ -127,25 +215,24 @@ const handleSavePayment = async () => {
       {/* Customer Table */}
     <Table
   columns={columns}
-data={customers.map((c, index) => ({
-  sr: index + 1,
-  id: c._id,
+data={customers.map((c, index) => {
+  return {
+    sr: index + 1,
+    id: c._id,
+    name: `${c.first_name || ""} ${c.last_name || ""}`,
+    company: c.company_name || "-",
+    address: [
+      c.address_line_1,
+      c.address_line_2,
+      c.city,
+      c.state,
+    ].filter(Boolean).join(", ") || "-",
+    phone: c.contact_no_1 || c.contact_no_2 || "-",
 
-  name: `${c.first_name || ""} ${c.last_name || ""}`,
-
-  company: c.company_name || "-",
-
-  address: [
-    c.address_line_1,
-    c.address_line_2,
-    c.city,
-    c.state,
-  ].filter(Boolean).join(", ") || "-",
-
-  phone: c.contact_no_1 || c.contact_no_2 || "-",
-
-  outstanding: `₹${c.pending_amount || 0}`,
-}))}
+    // ✅ FIXED
+    outstanding: `₹${c.computed_outstanding || 0}`,
+  };
+})}
   searchPlaceholder="Search customers..."
 
   headerActions={
@@ -164,11 +251,18 @@ data={customers.map((c, index) => ({
 
   renderActions={(row) => (
     <button
-      onClick={(e) => {
-        e.stopPropagation();
-        setSelectedCustomer(row);
-        setShowPayModal(true);
-      }}
+onClick={async (e) => {
+  e.stopPropagation();
+
+  const invoices = await fetchCustomerInvoices(row.id);
+
+  setSelectedCustomer({
+    ...row,
+    invoices,
+  });
+
+  setShowPayModal(true);
+}}
       className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-green-600 border border-green-200 hover:bg-green-50 transition"
     >
       <TbWallet size={15} />
@@ -176,7 +270,6 @@ data={customers.map((c, index) => ({
     </button>
   )}
 
-  onDelete={(row) => console.log("Delete customer:", row)}
 />
 
       {/* Payment Modal */}

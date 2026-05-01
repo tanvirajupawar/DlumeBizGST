@@ -87,10 +87,12 @@ const formatted = products.map((p) => ({
   category: p.category || "",
   code: p.code || "",
 
+  // 🔥 ADD THIS LINE
+  barcode: p.barcode || "",
+
   purchasePrice: p.purchase_price || 0,
   mrp: p.mrp || 0,
 
-  // ✅ FIXED HERE
   in: p.stock_details?.in || 0,
   out: p.stock_details?.out || 0,
   total: p.stock_details?.total_stock || 0,

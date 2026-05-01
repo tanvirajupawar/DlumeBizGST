@@ -55,6 +55,10 @@ due_date: { type: Date },
   city: { type: String, default: "" },
   state: { type: String, default: "" },
   pincode: { type: String, default: "" },
+  balance_amount: {
+  type: Number,
+  default: 0,
+},
 
   createdOn: { type: Date, default: Date.now },
   updatedOn: { type: Date, default: Date.now },
@@ -83,6 +87,8 @@ saleOrderSchema.pre("save", async function (next) {
 
     this.invoice_no = await generateInvoiceNo(this.company_id, this.invoice_type);
   }
+
+  this.balance_amount = (this.total_amount || 0) - (this.paid_amount || 0);
 
   next();
 });

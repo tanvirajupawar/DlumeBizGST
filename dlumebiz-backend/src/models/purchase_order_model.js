@@ -70,11 +70,7 @@ const purchaseOrderSchema = new Schema({
     default: ""
   },
 
-  status: {
-    type: String,
-    enum: ["Paid", "Unpaid", "Partial Paid"],
-    default: "Unpaid"
-  },
+
 
   order_no: {
     type: String

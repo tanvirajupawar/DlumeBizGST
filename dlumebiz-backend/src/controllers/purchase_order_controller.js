@@ -145,11 +145,10 @@ fetch: async function (req, res) {
     }
 
     // ✅ Fetch orders
-    const orders = await PurchaseOrderModel.find(filter)
-     .populate("vendor_id", "company_name gst gstin state_code")
-      .sort({ createdOn: -1 })
-      .lean();
-
+const orders = await PurchaseOrderModel.find(filter)
+  .populate("vendor_id", "vendor_name company_name gst gstin state_code")
+  .sort({ createdOn: -1 })
+  .lean();
     // ✅ Fetch ONLY related details (IMPORTANT FIX)
     const orderIds = orders.map(o => o._id);
 
@@ -158,12 +157,18 @@ fetch: async function (req, res) {
     }).lean();
 
     // ✅ Map details to each order
-    const finalData = orders.map(order => ({
-      ...order,
-      details: details.filter(
-        d => d.purchase_order_id.toString() === order._id.toString()
-      )
-    }));
+ const finalData = orders.map(order => {
+  const balance =
+    (order.total_amount || 0) - (order.paid_amount || 0);
+
+  return {
+    ...order,
+    balance_amount: balance, // 🔥 ADD THIS
+    details: details.filter(
+      d => d.purchase_order_id.toString() === order._id.toString()
+    )
+  };
+});
 
     return res.json({
       success: true,

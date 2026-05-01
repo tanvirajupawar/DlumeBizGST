@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { FiX, FiDownload, FiPrinter, FiEdit2 } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
+import StatusBadge from "./StatusBadge";
 
 const fmt = (n) =>
   "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 });
@@ -102,28 +103,40 @@ const DebitNoteDetailPanel = ({ note, onClose }) => {
         {/* Header */}
         <div className="flex justify-between px-6 pt-5 pb-4 border-b border-gray-100">
           <div>
-            <p className="text-base font-semibold">{note.partyName}</p>
-            <p className="text-xs font-mono text-gray-400">{note.debitNo}</p>
+         <p className="text-base font-semibold text-gray-800">
+  {note.customerName || note.partyName}
+</p>
+
+<p className="text-xs text-gray-500">
+  {note.companyName || "-"}
+</p>
+
+<p className="text-xs font-mono text-gray-400 mt-0.5">
+  {note.debitNo || "—"}
+</p>
           </div>
           <button onClick={handleClose}><FiX /></button>
         </div>
 
         {/* Meta */}
-        <div className="grid grid-cols-3 border-b border-gray-100">
-          <div className="px-5 py-3">
-            <p className="text-xs text-gray-400">Date</p>
-            <p>{note.date}</p>
-          </div>
-          <div className="px-5 py-3">
-            <p className="text-xs text-gray-400">Amount</p>
-            <p>{fmt(note.amount)}</p>
-          </div>
-          <div className="px-5 py-3">
-            <p className="text-xs text-gray-400">Invoice</p>
-            <p>{note.invoiceNo}</p>
-          </div>
-        </div>
+     <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100">
+  <div className="px-5 py-3">
+    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Date</p>
+    <p className="text-sm font-medium">
+      {new Date(note.date).toLocaleDateString("en-GB").replace(/\//g, "-")}
+    </p>
+  </div>
 
+  <div className="px-5 py-3">
+    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Amount</p>
+    <p className="text-sm font-medium">{fmt(note.amount)}</p>
+  </div>
+
+  <div className="px-5 py-3">
+    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Status</p>
+    <StatusBadge status={note.status} />
+  </div>
+</div>
         {/* Items */}
         <div className="flex-1 overflow-y-auto">
           <div className="px-6 pt-5 pb-2">
@@ -135,7 +148,7 @@ const DebitNoteDetailPanel = ({ note, onClose }) => {
           ) : (
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50">
+                <tr className="border-y border-gray-100 bg-gray-50">
                   <th className="px-6 py-2 text-left">Item</th>
                   <th className="px-4 py-2 text-right">Qty</th>
                   <th className="px-4 py-2 text-right">Rate</th>
@@ -144,11 +157,27 @@ const DebitNoteDetailPanel = ({ note, onClose }) => {
               </thead>
               <tbody>
                 {note.items.map((i, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50">
-                    <td className="px-6 py-3">{i.item}</td>
-                    <td className="px-4 py-3 text-right">{i.qty}</td>
-                    <td className="px-4 py-3 text-right">{fmt(i.rate)}</td>
-                    <td className="px-6 py-3 text-right font-semibold">{fmt(i.total)}</td>
+                  <tr
+  key={idx}
+  className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${
+    idx === note.items.length - 1 ? "border-b-0" : ""
+  }`}
+>
+                <td className="px-6 py-3 text-xs font-medium text-gray-800">
+  {i.item}
+</td>
+
+<td className="px-4 py-3 text-xs text-gray-500 text-right tabular-nums">
+  {i.qty}
+</td>
+
+<td className="px-4 py-3 text-xs text-gray-500 text-right tabular-nums">
+  {fmt(i.rate)}
+</td>
+
+<td className="px-6 py-3 text-xs font-semibold text-gray-800 text-right tabular-nums">
+  {fmt(i.total)}
+</td>
                   </tr>
                 ))}
               </tbody>
@@ -157,7 +186,7 @@ const DebitNoteDetailPanel = ({ note, onClose }) => {
 
           {/* Total */}
           {note.items?.length > 0 && (
-            <div className="mx-6 mt-4 pt-3 flex justify-between pb-6">
+         <div className="mx-6 mt-4 pt-3.5 border-t border-gray-200 flex items-center justify-between pb-6">
               <p className="text-xs text-gray-400">Grand Total</p>
               <p className="font-bold">{fmt(note.amount)}</p>
             </div>

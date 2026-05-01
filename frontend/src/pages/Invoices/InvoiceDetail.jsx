@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FiPrinter, FiShare2, FiArrowLeft,  FiDownload } from "react-icons/fi";
 import Logo from "../../assets/logo.svg";
+import { useLocation } from "react-router-dom";
 
 // ─── Mock Data ─────────────────────────────────────────────────────────────
 const mockInvoices = [
@@ -642,12 +643,11 @@ const [customerType, setCustomerType] = useState(invoice.customerType || "B2B");
 export default function InvoiceDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // ── Added: mode & invoice state for edit toggle ──
   const [mode, setMode] = useState("view");
-  const [invoice, setInvoice] = useState(
-    mockInvoices.find((inv) => inv.id === Number(id)) || mockInvoices[0]
-  );
+const [invoice, setInvoice] = useState(location.state || null);
   const [toast, setToast] = useState(false);
 
   const handleSave = (updated) => {

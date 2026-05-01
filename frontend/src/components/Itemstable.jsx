@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import axios from "axios";
+import HSNSearchDropdown from "./HSNSearchDropdown";
+import BarcodeScanner from "./BarcodeScanner";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const gstOptions = [0, 5, 12, 18, 28];
@@ -24,23 +26,19 @@ function AddItemsModal({ itemList, onAdd, onClose, isSales }) {
   const [selected, setSelected]     = useState({});
   const [newItemForm, setNewItemForm] = useState(null);
 
-const catalog = itemList.map((item, index) => ({
-  id: item._id || item.id || `${item.product}-${index}`, 
+  const catalog = itemList.map((item, index) => ({
+    id:            item._id || item.id || `${item.product}-${index}`,
     name:          item.product,
     code:          item.code          || "",
     hsn:           item.hsn           || "",
     size:          item.size          || "",
-    // ✅ FIX: read both possible field names from API
-purchasePrice: Number(
-  item.purchase_price ??
-  item.purchasePrice ??
-  item.price ??      // 🔥 ADD THIS
-  0
-),
-    salesPrice:    Number(item.mrp            || item.salePrice     || 0),
-    gstRate:       Number(item.gst_rate       || item.gstRate       || 18),
-    stock:         Number(item.total          || item.stock         || 0),
-    unit:          item.unit || "NOS",
+    sku:           item.sku           || "",
+    barcode:       item.barcode       || "",
+    purchasePrice: Number(item.purchase_price ?? item.purchasePrice ?? item.price ?? 0),
+    salesPrice:    Number(item.mrp    || item.salePrice  || 0),
+    gstRate:       Number(item.gst_rate || item.gstRate  || 18),
+    stock:         Number(item.total  || item.stock      || 0),
+    unit:          item.unit     || "NOS",
     itemType:      item.item_type || item.itemType || "Goods",
   }));
 
@@ -75,75 +73,68 @@ purchasePrice: Number(
 
   const selectedCount = Object.keys(selected).length;
 
-  // ✅ FIX: all fields correctly mapped — purchasePrice, gstRate, itemType from catalog
- const handleAddToBill = () => {
-  const toAdd = Object.values(selected).map(({ item, qty }) => {
-return {
-  name: item.name,
-  product_id: item.id,
-  qty,
+  const handleAddToBill = () => {
+    const toAdd = Object.values(selected).map(({ item, qty }) => ({
+      name:          item.name,
+      product_id:    item.id,
+      qty,
+      salePrice:     item.salesPrice    || 0,
+      purchasePrice: item.purchasePrice || 0,
+      unit:          item.unit          || "NOS",
+      discount:      0,
+      itemType:      item.itemType      || "Goods",
+      hsn:           item.hsn           || "",
+      gstRate:       item.gstRate       || 18,
+      total_stock:   item.stock         || 0,
+    }));
+    onAdd(toAdd);
+    onClose();
+  };
 
-  salePrice: item.salesPrice || 0,   // ✅ ADD THIS
-
-  purchasePrice: item.purchasePrice || 0,
-  unit: item.unit || "NOS",
-  discount: 0,
-  itemType: item.itemType || "Goods",
-  hsn: item.hsn || "",
-
-  total_stock: item.stock || 0,   // 🔥🔥 MOST IMPORTANT FIX
+const generateBarcode = () => {
+  const timestamp = Date.now().toString().slice(-6); // last 6 digits
+  const random = Math.floor(100 + Math.random() * 900); // 3 digit random
+  return `DLB${timestamp}${random}`;
 };
-  });
 
-  onAdd(toAdd);
-  onClose();
-};
 
-  // ✅ FIX: itemType included, all fields present
   const handleSaveNewItem = async () => {
     if (!newItemForm?.name?.trim()) { alert("Item name is required"); return; }
     try {
-      const payload = {
-        product:        newItemForm.name,
-        hsn:            newItemForm.hsn,
-        size:           newItemForm.size,
-        unit:           newItemForm.unit,
-        purchase_price: newItemForm.purchasePrice,
-        mrp:            newItemForm.salePrice || 0,
-        company_id:     localStorage.getItem("company_id"),
-      };
+    const barcode = generateBarcode(); 
+
+const payload = {
+  product:        newItemForm.name,
+  hsn:            newItemForm.hsn,
+  size:           newItemForm.size,
+  unit:           newItemForm.unit,
+  purchase_price: newItemForm.purchasePrice,
+  mrp:            newItemForm.salePrice || 0,
+  barcode:        barcode,
+  company_id:     localStorage.getItem("company_id"),
+};
       const res = await axios.post("http://localhost:8000/api/product", payload);
-if (res.data.success) {
-  const created = res.data.data;
-
-  // ✅ ADD THIS
-  itemList.unshift(created);   // 🔥 add new item to catalog
-
-  onAdd([{
-    name: created.product,
-    product_id: created._id,
-    itemType: newItemForm.itemType || "Goods",
-    hsn: created.hsn || "",
-    size: created.size || "",
-    unit: created.unit || "NOS",
-    qty: newItemForm.qty,
-
-    purchasePrice: Number(
-      created.purchase_price ??
-      created.price ??   // 🔥 fallback
-      newItemForm.purchasePrice ??
-      0
-    ),
-
-    salePrice: Number(created.mrp || 0),
-    discount: 0,
-    baseDiscount: 0,
-    extraDiscount: 0,
-    gstRate: Number(created.gst_rate || newItemForm.gstRate || 18),
-  }]);
-
-  onClose();
-}
+      if (res.data.success) {
+        const created = res.data.data;
+        itemList.unshift(created);
+        onAdd([{
+          name:          created.product,
+          barcode:       created.barcode || barcode,
+          product_id:    created._id,
+          itemType:      newItemForm.itemType || "Goods",
+          hsn:           created.hsn          || "",
+          size:          created.size         || "",
+          unit:          created.unit         || "NOS",
+          qty:           newItemForm.qty,
+          purchasePrice: Number(created.purchase_price ?? created.price ?? newItemForm.purchasePrice ?? 0),
+          salePrice:     Number(created.mrp   || 0),
+          discount:      0,
+          baseDiscount:  0,
+          extraDiscount: 0,
+          gstRate:       Number(created.gst_rate || newItemForm.gstRate || 18),
+        }]);
+        onClose();
+      }
     } catch (err) { console.error(err); alert("Error saving item"); }
   };
 
@@ -155,7 +146,7 @@ if (res.data.success) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
-      <div style={{ background: "#fff", borderRadius: "12px", width: "100%", maxWidth: "860px", boxShadow: "0 24px 64px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", maxHeight: "92vh", overflow: "hidden" }}>
+      <div style={{ background: "#fff", borderRadius: "12px", width: "100%", maxWidth: "860px",  overflowX: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column", maxHeight: "92vh", overflow: "hidden" }}>
 
         <div style={{ padding: "18px 24px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <div style={{ fontWeight: 700, fontSize: "16px", color: "#111827" }}>Add Items to Bill</div>
@@ -178,61 +169,52 @@ if (res.data.success) {
           )}
         </div>
 
-        {/* ✅ New item form — added GST Rate + Item Type fields */}
         {!isSales && newItemForm && (
           <div style={{ padding: "14px 24px", background: "#f0f7ff", borderBottom: "1px solid #bfdbfe", flexShrink: 0 }}>
             <div style={{ fontSize: "12px", fontWeight: 700, color: "#1d4ed8", marginBottom: "10px", textTransform: "uppercase", letterSpacing: "0.05em" }}>New Item Details</div>
             <div style={{ display: "flex", gap: "8px", alignItems: "flex-end", flexWrap: "wrap" }}>
-              {[
-                { label: "Item Name *", flex: "2 1 160px", field: "name",    placeholder: "Item name"      },
-                { label: "HSN",         flex: "1 1 80px",  field: "hsn",     placeholder: "HSN code"       },
-                { label: "Size / Pack", flex: "1 1 80px",  field: "size",    placeholder: "e.g. 1kg, 500ml"},
-              ].map(({ label, flex, field, placeholder }) => (
-                <div key={field} style={{ flex }}>
-                  <label style={{ fontSize: "10px", color: "#6b7280", display: "block", marginBottom: "3px", textTransform: "uppercase", fontWeight: 600 }}>{label}</label>
-                  <input style={{ ...inp, width: "100%" }} value={newItemForm[field]} onChange={(e) => setNewItemForm((f) => ({ ...f, [field]: e.target.value }))} placeholder={placeholder}
-                    onFocus={(e) => (e.target.style.borderColor = "#2563eb")} onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")} />
+              <div style={{ display: "flex", gap: "8px", alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div style={{ flex: "2 1 160px" }}>
+                  <label>Item Name *</label>
+                  <input style={{ ...inp, width: "100%" }} value={newItemForm.name} onChange={(e) => setNewItemForm(f => ({ ...f, name: e.target.value }))} />
                 </div>
-              ))}
+                <div style={{ flex: "1 1 140px", position: "relative" }}>
+                  <label>HSN</label>
+                  <HSNSearchDropdown value={newItemForm.hsn} onSelect={(hsnItem) => setNewItemForm(prev => ({ ...prev, hsn: hsnItem.code, gstRate: hsnItem.gst }))} />
+                </div>
+                <div style={{ flex: "1 1 80px" }}>
+                  <label>Size / Pack</label>
+                  <input style={{ ...inp, width: "100%" }} value={newItemForm.size} onChange={(e) => setNewItemForm(f => ({ ...f, size: e.target.value }))} />
+                </div>
+              </div>
 
-              {/* Item Type */}
               <div style={{ flex: "1 1 100px" }}>
                 <label style={{ fontSize: "10px", color: "#6b7280", display: "block", marginBottom: "3px", textTransform: "uppercase", fontWeight: 600 }}>Type</label>
                 <select style={{ ...inp, width: "100%" }} value={newItemForm.itemType} onChange={(e) => setNewItemForm((f) => ({ ...f, itemType: e.target.value }))}>
                   {itemTypes.map((t) => <option key={t}>{t}</option>)}
                 </select>
               </div>
-
-              {/* Unit */}
               <div style={{ flex: "1 1 80px" }}>
                 <label style={{ fontSize: "10px", color: "#6b7280", display: "block", marginBottom: "3px", textTransform: "uppercase", fontWeight: 600 }}>Unit</label>
                 <select style={{ ...inp, width: "100%" }} value={newItemForm.unit} onChange={(e) => setNewItemForm((f) => ({ ...f, unit: e.target.value }))}>
                   {units.map((u) => <option key={u}>{u}</option>)}
                 </select>
               </div>
-
-              {/* Qty */}
               <div style={{ flex: "0.7 1 60px" }}>
                 <label style={{ fontSize: "10px", color: "#6b7280", display: "block", marginBottom: "3px", textTransform: "uppercase", fontWeight: 600 }}>Qty *</label>
                 <input type="number" min="1" style={{ ...inp, width: "100%" }} value={newItemForm.qty} onChange={(e) => setNewItemForm((f) => ({ ...f, qty: Number(e.target.value) }))}
                   onFocus={(e) => (e.target.style.borderColor = "#2563eb")} onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")} />
               </div>
-
-              {/* Purchase Price */}
               <div style={{ flex: "1 1 100px" }}>
                 <label style={{ fontSize: "10px", color: "#6b7280", display: "block", marginBottom: "3px", textTransform: "uppercase", fontWeight: 600 }}>Purchase Price *</label>
                 <input type="number" min="0" style={{ ...inp, width: "100%" }} value={newItemForm.purchasePrice} onChange={(e) => setNewItemForm((f) => ({ ...f, purchasePrice: Number(e.target.value) }))}
                   onFocus={(e) => (e.target.style.borderColor = "#2563eb")} onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")} />
               </div>
-
-              {/* Sale Price */}
               <div style={{ flex: "1 1 100px" }}>
                 <label style={{ fontSize: "10px", color: "#6b7280", display: "block", marginBottom: "3px", textTransform: "uppercase", fontWeight: 600 }}>Sale Price</label>
                 <input type="number" min="0" style={{ ...inp, width: "100%" }} value={newItemForm.salePrice} onChange={(e) => setNewItemForm((f) => ({ ...f, salePrice: Number(e.target.value) }))}
                   onFocus={(e) => (e.target.style.borderColor = "#2563eb")} onBlur={(e) => (e.target.style.borderColor = "#e5e7eb")} />
               </div>
-
-            
 
               <div style={{ display: "flex", gap: "6px", flexShrink: 0, alignSelf: "flex-end" }}>
                 <button onClick={handleSaveNewItem} style={{ padding: "6px 14px", border: "none", borderRadius: "6px", background: "#2563eb", color: "#fff", fontSize: "12px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Add</button>
@@ -242,8 +224,8 @@ if (res.data.success) {
           </div>
         )}
 
-<div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+        <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse",  tableLayout: "auto" }}>
             <thead style={{ position: "sticky", top: 0, zIndex: 1 }}>
               <tr style={{ background: "#fff", borderBottom: "2px solid #e5e7eb" }}>
                 {["Item Name", "HSN", "Size/Pack", "Stock", "Sale Price", "Purchase Price", "Quantity"].map((h) => (
@@ -276,19 +258,7 @@ if (res.data.success) {
                             if (isSales && item.stock <= 0) { alert("Out of stock"); return; }
                             toggleItem(item);
                           }}
-                        style={{
-  padding: "5px 12px",
-  border: "1.5px solid #bfdbfe",
-  borderRadius: "7px",
-  background: (isSales && item.stock <= 0) ? "#e5e7eb" : "#eff6ff",
-  cursor: (isSales && item.stock <= 0) ? "not-allowed" : "pointer",
-  color: (isSales && item.stock <= 0) ? "#9ca3af" : "#2563eb",
-  fontSize: "12px",
-  fontWeight: 700,
-  fontFamily: "inherit",
-  width: "auto",
-  whiteSpace: "nowrap",
-}}
+                          style={{ padding: "5px 12px", border: "1.5px solid #bfdbfe", borderRadius: "7px", background: (isSales && item.stock <= 0) ? "#e5e7eb" : "#eff6ff", cursor: (isSales && item.stock <= 0) ? "not-allowed" : "pointer", color: (isSales && item.stock <= 0) ? "#9ca3af" : "#2563eb", fontSize: "12px", fontWeight: 700, fontFamily: "inherit", width: "auto", whiteSpace: "nowrap" }}
                           onMouseEnter={(e) => { if (!(isSales && item.stock <= 0)) { e.currentTarget.style.background = "#2563eb"; e.currentTarget.style.color = "#fff"; } }}
                           onMouseLeave={(e) => { e.currentTarget.style.background = (isSales && item.stock <= 0) ? "#e5e7eb" : "#eff6ff"; e.currentTarget.style.color = (isSales && item.stock <= 0) ? "#9ca3af" : "#2563eb"; }}>
                           {(isSales && item.stock <= 0) ? "Out of stock" : "+ Add"}
@@ -338,22 +308,92 @@ export default function ItemsTable({
   isSales,
 }) {
   const [showItemModal, setShowItemModal] = useState(false);
+  const [showScanner,   setShowScanner]   = useState(false);
 
-const colWidths = {
-  num:      "40px",
-  name:     "18%",
-  type:     "10%",
-  hsn:      "7%",
-  unit:     "7%",
-  qty:      "5%",
-  price:    "10%",
-  discount: "7%",
-  taxable:  "9%",
-  gst:      "6%",   
-  tax:      "8%",  
-  total:    "8%",
-  del:      "30px",
-};
+  // ─── Barcode scan handler ────────────────────────────────────────────────
+  const handleBarcodeScan = (code) => {
+    const clean = code.trim();
+    if (!clean) return;
+
+    // Build a normalised catalog for matching
+    const catalog = itemList.map((item) => ({
+      raw:           item,
+      sku:           (item.sku      || "").toLowerCase(),
+      barcode:       (item.barcode  || "").toLowerCase(),
+      code:          (item.code     || "").toLowerCase(),
+      hsn:           (item.hsn      || "").toLowerCase(),
+    }));
+
+    const lc = clean.toLowerCase();
+    const found = catalog.find(
+      (c) =>
+        (c.sku     && c.sku     === lc) ||
+       (c.barcode && c.barcode.toLowerCase().trim() === lc)||
+        (c.code    && c.code    === lc) ||
+        (c.hsn     && c.hsn     === lc)
+    );
+
+    if (found) {
+      const item = found.raw;
+
+      // If item already exists in bill, increment qty instead of adding a new row
+      const existingIndex = items.findIndex(
+        (it) => String(it.product_id) === String(item._id || item.id)
+      );
+
+      if (existingIndex >= 0) {
+        updateItem(existingIndex, "qty", (Number(items[existingIndex].qty) || 0) + 1);
+      } else {
+        addItems([{
+          name:          item.product,
+          product_id:    item._id || item.id,
+          qty:           1,
+          purchasePrice: Number(item.purchase_price ?? item.purchasePrice ?? item.price ?? 0),
+          salePrice:     Number(item.mrp    || item.salePrice    || 0),
+          unit:          item.unit          || "NOS",
+          hsn:           item.hsn           || "",
+          gstRate:       Number(item.gst_rate || item.gstRate    || 18),
+          itemType:      item.item_type     || item.itemType     || "Goods",
+          discount:      0,
+          baseDiscount:  0,
+          extraDiscount: 0,
+          total_stock:   Number(item.total  || item.stock        || 0),
+        }]);
+      }
+    } else {
+      // Not matched — add a blank row pre-filled with the scanned code as SKU
+      addItems([{
+        name:          "",
+        sku:           clean,
+        qty:           1,
+        purchasePrice: 0,
+        salePrice:     0,
+        unit:          "NOS",
+        hsn:           "",
+        gstRate:       18,
+        itemType:      "Goods",
+        discount:      0,
+        total_stock:   0,
+      }]);
+      alert(`Barcode "${clean}" not found in catalog.\nA blank row has been added — please fill in the details.`);
+    }
+  };
+
+  const colWidths = {
+    num:      "40px",
+    name:     "18%",
+    type:     "10%",
+    hsn:      "7%",
+    unit:     "7%",
+    qty:      "5%",
+    price:    "10%",
+    discount: "7%",
+    taxable:  "9%",
+    gst:      "6%",
+    tax:      "8%",
+    total:    "8%",
+    del:      "30px",
+  };
 
   const thStyle = (align = "left") => ({
     padding: "9px 8px", textAlign: align, fontSize: "11px", fontWeight: 700,
@@ -375,6 +415,7 @@ const colWidths = {
 
   return (
     <>
+      {/* ── Modals ── */}
       {showItemModal && (
         <AddItemsModal
           itemList={itemList}
@@ -384,26 +425,38 @@ const colWidths = {
         />
       )}
 
+      {showScanner && (
+        <BarcodeScanner
+          onScan={(code) => {
+            handleBarcodeScan(code);
+            // Keep scanner open for continuous scanning
+            // Remove the line below if you want it to close after each scan
+          }}
+          onClose={() => setShowScanner(false)}
+        />
+      )}
+
+      {/* ── Items Table ── */}
       <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "12px" }}>
         <colgroup>
           {Object.values(colWidths).map((w, i) => <col key={i} style={{ width: w }} />)}
         </colgroup>
         <thead>
-        <tr>
-  <th style={thStyle("center")}>#</th>
-  <th style={thStyle()}>Item Name</th>
-  <th style={thStyle()}>Type</th>
-  <th style={thStyle()}>HSN</th>
-  <th style={thStyle("center")}>Unit</th>
-  <th style={thStyle("center")}>Qty</th>
-  <th style={thStyle("right")}>{isSales ? "Sale Price (₹)" : "Purchase Price (₹)"}</th>
-  <th style={thStyle("right")}>Disc (₹)</th>
-  <th style={thStyle("right")}>Taxable (₹)</th>
-  <th style={thStyle("center")}>GST %</th>   
-  <th style={thStyle("right")}>Tax (₹)</th>
-  <th style={thStyle("right")}>Total (₹)</th>
-  <th style={thStyle()}></th>
-</tr>
+          <tr>
+            <th style={thStyle("center")}>#</th>
+            <th style={thStyle()}>Item Name</th>
+            <th style={thStyle()}>Type</th>
+            <th style={thStyle()}>HSN</th>
+            <th style={thStyle("center")}>Unit</th>
+            <th style={thStyle("center")}>Qty</th>
+            <th style={thStyle("right")}>{isSales ? "Sale Price (₹)" : "Purchase Price (₹)"}</th>
+            <th style={thStyle("right")}>Disc (₹)</th>
+            <th style={thStyle("right")}>Taxable (₹)</th>
+            <th style={thStyle("center")}>GST %</th>
+            <th style={thStyle("right")}>Tax (₹)</th>
+            <th style={thStyle("right")}>Total (₹)</th>
+            <th style={thStyle()}></th>
+          </tr>
         </thead>
         <tbody>
           {items.map((item, i) => {
@@ -412,6 +465,7 @@ const colWidths = {
 
             return (
               <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+
                 {/* # */}
                 <td style={tdStyle("center", { color: "#9ca3af", fontWeight: 600 })}>{i + 1}</td>
 
@@ -422,9 +476,7 @@ const colWidths = {
 
                 {/* Type */}
                 <td style={tdStyle()}>
-                  <select
-                    value={item.itemType || "Goods"}  // ✅ fallback prevents blank select
-                    onChange={(e) => updateItem(i, "itemType", e.target.value)}
+                  <select value={item.itemType || "Goods"} onChange={(e) => updateItem(i, "itemType", e.target.value)}
                     style={{ ...inputStyle, padding: "5px 5px", fontSize: "11.5px", appearance: "none" }}>
                     {itemTypes.map((t) => <option key={t}>{t}</option>)}
                   </select>
@@ -432,14 +484,18 @@ const colWidths = {
 
                 {/* HSN */}
                 <td style={tdStyle()}>
-                  {cellInput(item.hsn, (e) => updateItem(i, "hsn", e.target.value), { padding: "5px 7px" })}
+                  <HSNSearchDropdown
+                    value={item.hsn}
+                    onSelect={(hsnItem) => {
+                      updateItem(i, "hsn",     hsnItem.code);
+                      updateItem(i, "gstRate", hsnItem.gst);
+                    }}
+                  />
                 </td>
 
                 {/* Unit */}
                 <td style={tdStyle("center")}>
-                  <select
-                    value={item.unit || "NOS"}  // ✅ fallback
-                    onChange={(e) => updateItem(i, "unit", e.target.value)}
+                  <select value={item.unit || "NOS"} onChange={(e) => updateItem(i, "unit", e.target.value)}
                     style={{ ...inputStyle, padding: "5px 5px", fontSize: "11.5px", appearance: "none", textAlign: "center" }}>
                     {units.map((u) => <option key={u}>{u}</option>)}
                   </select>
@@ -450,7 +506,7 @@ const colWidths = {
                   {cellInput(item.qty, (e) => updateItem(i, "qty", Number(e.target.value)), { padding: "5px 6px", textAlign: "center" })}
                 </td>
 
-                {/* ✅ FIX: purchasePrice for purchase, salePrice for sales */}
+                {/* Price */}
                 <td style={tdStyle("right")}>
                   {isSales
                     ? cellInput(item.salePrice,     (e) => updateItem(i, "salePrice",     Number(e.target.value)), { padding: "5px 7px", textAlign: "right" })
@@ -479,9 +535,7 @@ const colWidths = {
 
                 {/* GST % */}
                 <td style={tdStyle("center")}>
-                  <select
-                    value={item.gstRate ?? 18}  // ✅ fallback
-                    onChange={(e) => updateItem(i, "gstRate", Number(e.target.value))}
+                  <select value={item.gstRate ?? 18} onChange={(e) => updateItem(i, "gstRate", Number(e.target.value))}
                     style={{ ...inputStyle, padding: "5px 4px", fontSize: "11.5px", appearance: "none", textAlign: "center" }}>
                     {gstOptions.map((r) => <option key={r} value={r}>{r}%</option>)}
                   </select>
@@ -510,7 +564,7 @@ const colWidths = {
 
           {items.length === 0 && (
             <tr>
-              <td colSpan={12} style={{ padding: "28px", textAlign: "center", color: "#9ca3af", fontSize: "13px" }}>
+              <td colSpan={13} style={{ padding: "28px", textAlign: "center", color: "#9ca3af", fontSize: "13px" }}>
                 No items added yet.{" "}
                 <span onClick={() => setShowItemModal(true)} style={{ color: "#2563eb", cursor: "pointer", fontWeight: 600 }}>
                   Add from catalog?
@@ -521,10 +575,37 @@ const colWidths = {
         </tbody>
       </table>
 
-      <button onClick={() => setShowItemModal(true)}
-        style={{ marginTop: "12px", padding: "8px 18px", border: "1.5px dashed #d1d5db", borderRadius: "8px", background: "none", fontSize: "13px", fontWeight: 600, color: "#3b82f6", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", fontFamily: "inherit" }}>
-        <span style={{ fontSize: "16px" }}>+</span> Add Item
-      </button>
+      {/* ── Bottom Action Bar ── */}
+      <div style={{ marginTop: "12px", display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+
+        {/* Add Item button */}
+        <button onClick={() => setShowItemModal(true)}
+          style={{ padding: "8px 18px", border: "1.5px dashed #d1d5db", borderRadius: "8px", background: "none", fontSize: "13px", fontWeight: 600, color: "#3b82f6", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px", fontFamily: "inherit" }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#3b82f6"; e.currentTarget.style.background = "#eff6ff"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.background = "none"; }}>
+          <span style={{ fontSize: "16px", lineHeight: 1 }}>+</span> Add Item
+        </button>
+
+        {/* Scan Barcode button */}
+        <button onClick={() => setShowScanner(true)}
+          style={{ padding: "8px 18px", border: "1.5px solid #d1d5db", borderRadius: "8px", background: "#fff", fontSize: "13px", fontWeight: 600, color: "#374151", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "8px", fontFamily: "inherit" }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "#1e3a5f"; e.currentTarget.style.color = "#1e3a5f"; e.currentTarget.style.background = "#f0f7ff"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.color = "#374151"; e.currentTarget.style.background = "#fff"; }}>
+          {/* Barcode icon */}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 9V6a1 1 0 0 1 1-1h3"/>
+            <path d="M15 5h3a1 1 0 0 1 1 1v3"/>
+            <path d="M21 15v3a1 1 0 0 1-1 1h-3"/>
+            <path d="M9 21H6a1 1 0 0 1-1-1v-3"/>
+            <line x1="7"  y1="9"  x2="7"  y2="15"/>
+            <line x1="10" y1="9"  x2="10" y2="15"/>
+            <line x1="13" y1="9"  x2="13" y2="15"/>
+            <line x1="16" y1="9"  x2="16" y2="15"/>
+          </svg>
+          Scan Barcode
+        </button>
+
+      </div>
     </>
   );
 }

@@ -1,41 +1,31 @@
-import { useState, useRef } from "react";
+import { useState, useEffect } from "react";
+import axios from "axios";
 import { FiTrash2 } from "react-icons/fi";
 import Modal from "./Modal";
 
 const fmt = (n) => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 });
 
-/**
- * PurchaseReturnModal
- *
- * Props:
- *  - invoice   {object}   The invoice to return against (see shape below)
- *  - onClose   {function} Called when modal requests to close
- *  - onConfirm {function} Called with { invoice, returnItems, returnTotal, returnNumber }
- *
- * Invoice shape:
- *  {
- *    invoiceNo: string,
- *    vendor:    string,
- *    date:      string,
- *    items: [{ item, code, qty, price }]
- *  }
- *
- * Usage:
- *  {purchaseReturnTarget && (
- *    <PurchaseReturnModal
- *      invoice={purchaseReturnTarget}
- *      onClose={() => setPurchaseReturnTarget(null)}
- *      onConfirm={(data) => {
- *        console.log(data);
- *        setPurchaseReturnTarget(null);
- *      }}
- *    />
- *  )}
- */
+
+
+
 const PurchaseReturnModal = ({ invoice, onClose, onConfirm }) => {
-  const returnNumber = useRef(
-    `PR-${invoice.invoiceNo}-${Date.now().toString().slice(-4)}`
-  );
+
+  const [returnNo, setReturnNo] = useState("");
+
+  useEffect(() => {
+    const fetchPR = async () => {
+      try {
+        const res = await axios.get("http://localhost:8000/api/purchase-return/next-number");
+        if (res.data.success) {
+          setReturnNo(res.data.return_no);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    fetchPR();
+  }, []);
 
 const [returnItems, setReturnItems] = useState(
   (invoice?.items || []).map((item) => ({
@@ -82,7 +72,7 @@ const [returnItems, setReturnItems] = useState(
               Return No
             </p>
             <p className="text-xs font-bold text-[#1e3a8a] font-mono">
-              {returnNumber.current}
+              {returnNo || "Loading..."}
             </p>
           </div>
         </div>

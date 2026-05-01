@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { FiX } from "react-icons/fi";
 import { FiDownload, FiPrinter, FiEdit2 } from "react-icons/fi";
+import StatusBadge from "./StatusBadge";
+
 
 const fmt = (n) => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 });
 
@@ -106,7 +108,12 @@ const handleDownload = () => {
         {/* Header */}
         <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-gray-100">
           <div>
-            <p className="text-base font-semibold text-gray-800">{invoice.vendor}</p>
+      <p className="text-base font-semibold text-gray-800">
+  {invoice.vendor}
+</p>
+<p className="text-xs text-gray-500">
+  {invoice.companyName || "-"}
+</p>
             <p className="text-xs font-mono text-gray-400 mt-0.5">{invoice.invoiceNo || "—"}</p>
           </div>
           <button
@@ -120,29 +127,19 @@ const handleDownload = () => {
         {/* Meta row */}
         <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100">
           {[
-            { label: "Date",   value: invoice.date },
-            { label: "Amount", value: fmt(invoice.amount), mono: true },
-          {
-  label: "Status",
-  value: (() => {
-    if (invoice.balance_amount === 0) return "Paid";
-    if (invoice.balance_amount < invoice.amount) return "Partial";
-    return "Unpaid";
-  })(),
-  badge: (() => {
-    if (invoice.balance_amount === 0) return "bg-green-100 text-green-800";
-    if (invoice.balance_amount < invoice.amount) return "bg-yellow-100 text-yellow-800";
-    return "bg-red-100 text-red-700";
-  })(),
-},
-          ].map(({ label, value, mono, badge }) => (
+  { label: "Date", value: invoice.date },
+  { label: "Amount", value: fmt(invoice.amount), mono: true },
+  { label: "Status", value: invoice.status }, // ✅ ADD THIS
+].map(({ label, value, mono, badge }) => (
             <div key={label} className="px-5 py-3">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400 mb-1">{label}</p>
-              {badge ? (
-                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${badge}`}>{value}</span>
-              ) : (
-                <p className={`text-sm font-medium text-gray-800 ${mono ? "tabular-nums" : ""}`}>{value}</p>
-              )}
+            {label === "Status" ? (
+  <StatusBadge status={invoice.status} />
+) : (
+  <p className={`text-sm font-medium text-gray-800 ${mono ? "tabular-nums" : ""}`}>
+    {value}
+  </p>
+)}
             </div>
           ))}
         </div>

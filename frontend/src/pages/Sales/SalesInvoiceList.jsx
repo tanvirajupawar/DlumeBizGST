@@ -40,32 +40,69 @@ const fetchInvoices = async () => {
   try {
     const res = await axios.get("http://localhost:8000/api/sales");
 
-    console.log("API RESPONSE:", res.data); // 🔍 DEBUG
+    console.log("API RESPONSE:", res.data);
 
-    const data = res.data.data || res.data; // handle both cases
+    const data = res.data.data || res.data;
 
-    const mapped = (data || []).map((inv) => ({
-_id: inv._id,
-id: inv._id,
-      customer_id: inv.client_id?._id,
-      invoiceNo: inv.invoice_no,
-  customerName: inv.client_id
-  ? `${inv.client_id.first_name || ""} ${inv.client_id.last_name || ""}`.trim()
-  : "Walk-in",
+    const mapped = (data || []).map((inv) => {
+      const customer = inv.client_id || {};
 
-companyName: inv.client_id?.company_name || "",
-      date: inv.invoice_date?.split("T")[0],
-      amount: inv.total_amount,
-      confirmed: inv.status === "Paid",
+      return {
+        // 🔑 BASIC
+        id: inv._id,
+        invoiceNo: inv.invoice_no || "",
+        invoiceDate: inv.invoice_date || "",
+        status: inv.status || "Unpaid",
 
-     items: (inv.details || []).map(d => ({
-  product_id: d.product_id,   // ✅ ADD THIS
-  item: d.product_name,
-  qty: d.qty,
-  price: d.price,
-  total: d.amount,
-})),
-    }));
+        // ✅ IMPORTANT (USED IN LIST UI)
+        customerName:
+          (customer.first_name || "") + " " + (customer.last_name || ""),
+        companyName: customer.company_name || "Walk-in",
+
+        date: inv.invoice_date || "",
+        amount: inv.total_amount || 0,
+
+        // ✅ FULL OBJECT (USED IN DETAIL PAGE)
+        customer: {
+          company_name: customer.company_name || "Walk-in",
+          gstin: customer.gstin || "",
+          phone: customer.phone || "",
+          email: customer.email || "",
+          address_line1: customer.address || "",
+          city: customer.city || "",
+          state: customer.state || "",
+          pincode: customer.pincode || "",
+          place_of_supply: customer.state || "",
+          place_of_supply_code: "27",
+        },
+
+        shipping: {
+          company_name: customer.company_name || "",
+          address_line1: customer.address || "",
+          city: customer.city || "",
+          state: customer.state || "",
+          pincode: customer.pincode || "",
+          place_of_supply: customer.state || "",
+          place_of_supply_code: "27",
+        },
+
+        // ✅ ITEMS (FOR INVOICE PAGE)
+        items: (inv.details || []).map((d) => ({
+          description: d.product_name || "",
+          hsn: d.hsn || "",
+          unit: "NOS",
+          qty: d.qty || 0,
+          rate: d.price || 0,
+          discount: 0,
+          gstRate: d.gst || 18,
+        })),
+
+        // ✅ EXTRA (SAFE DEFAULTS)
+        pfCharge: 0,
+        supplyType: "intrastate",
+        total_amount: inv.total_amount || 0,
+      };
+    });
 
     setInvoices(mapped);
 
@@ -253,7 +290,9 @@ const filteredCollections = collections.filter(
         <div
           className={`grid grid-cols-[60px_1fr_1fr_140px_130px_130px_120px_90px_40px_40px] px-6 items-center cursor-pointer transition
           ${selectedInvoice?.id === inv.id ? "bg-blue-50/60" : "hover:bg-gray-50"}`}
-          onClick={() => setSelectedInvoice(inv)}
+          onClick={() =>
+  navigate(`/invoice/${inv.id}`, { state: inv })
+}
         >
 <div className="py-4 text-sm text-center text-gray-500">
   {idx + 1}
@@ -471,12 +510,6 @@ onCreditNote={() => setCreditNoteTarget(inv)}
 )}
 
 
-{selectedInvoice && (
-  <InvoiceDetailPanel
-    invoice={selectedInvoice}
-    onClose={() => setSelectedInvoice(null)}
-  />
-)}
 
 
 {salesReturnTarget && (

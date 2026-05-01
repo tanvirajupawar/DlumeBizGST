@@ -154,10 +154,13 @@ const shareLink = () => {
 };
 
 // ── helper: get balance for a row ─────────────────────────────────────────────
-const getBalance = (r) =>
-  r.balance_amount !== undefined && r.balance_amount !== null
-    ? Number(r.balance_amount)
-    : Number(r.total_amount || 0);
+const getBalance = (r) => {
+  const total = Number(r.total_amount || 0);
+  const paid  = Number(r.paid_amount || 0);
+  return total - paid;
+};
+
+
 
 // ── Pay Modal ─────────────────────────────────────────────────────────────────
 function PayModal({ invoices, vendorId, onClose, onSuccess }) {
@@ -194,11 +197,11 @@ function PayModal({ invoices, vendorId, onClose, onSuccess }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-[440px] p-6 space-y-4" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[440px] p-6 space-y-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <h2 className="text-[15px] font-semibold text-gray-800">Pay Selected Invoices</h2>
 
         {/* Invoice breakdown */}
-        <div className="border border-gray-100 rounded-xl overflow-hidden text-[12px]">
+        <div className="border border-gray-100 rounded-xl overflow-y-auto max-h-[300px] text-[12px]">
           {invoices.map((inv, i) => (
             <div key={i} className="flex justify-between px-4 py-2.5 border-b border-gray-100 last:border-0">
               <span className="font-mono text-gray-600">{inv.supplier_invoice_no || "—"}</span>
@@ -289,19 +292,30 @@ const [paymentData, setPaymentData] = useState(null);
     return () => window.removeEventListener("paymentUpdated", handle);
   }, []);
 
-  const toggleRow = (id) => setSelected(prev => prev.includes(id) ? prev.filter(n => n !== id) : [...prev, id]);
+const toggleRow = (id) => {
+  const strId = String(id);
+
+  setSelected(prev =>
+    prev.includes(strId)
+      ? prev.filter(n => n !== strId)
+      : [...prev, strId]
+  );
+};
   const toggleAll = () => {
-    const unpaidIds = invoices.filter(r => getBalance(r) > 0).map(r => r._id);
+    const unpaidIds = invoices
+  .filter(r => getBalance(r) > 0)
+  .map(r => String(r._id));
     setSelected(selected.length === unpaidIds.length ? [] : unpaidIds);
   };
 
   // selected invoice objects (for PayModal)
-  const selectedInvoices = invoices.filter(r => selected.includes(r._id));
-
+const selectedInvoices = invoices.filter(r =>
+  selected.includes(String(r._id))
+);
   const handleDownload = () => {
     downloadCSV("invoices.csv",
       ["Date", "Invoice No", "Amount", "Balance", "Status"],
-      invoices.map(r => [fmtDate(r.invoice_date), r.supplier_invoice_no || "—", r.total_amount || 0, r.balance_amount || 0, r.payment_status || "—"])
+      invoices.map(r => [fmtDate(r.invoice_date), r.supplier_invoice_no || "—", r.total_amount || 0, getBalance(r), r.payment_status || "—"])
     );
   };
 
@@ -309,7 +323,11 @@ const [paymentData, setPaymentData] = useState(null);
     const tableHTML = `<table><thead><tr><th>Date</th><th>Invoice No</th><th>Amount</th><th>Balance</th><th>Status</th></tr></thead><tbody>
       ${invoices.map(r => `<tr><td>${fmtDate(r.invoice_date)}</td><td>${r.supplier_invoice_no || "—"}</td>
         <td>₹${Number(r.total_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-        <td>${r.balance_amount > 0 ? "₹" + Number(r.balance_amount).toLocaleString("en-IN", { minimumFractionDigits: 2 }) : "—"}</td>
+<td>${
+  getBalance(r) > 0
+    ? "₹" + Number(getBalance(r)).toLocaleString("en-IN", { minimumFractionDigits: 2 })
+    : "—"
+}</td>
         <td>${r.payment_status || "—"}</td></tr>`).join("")}
     </tbody></table>`;
     openPrintWindow("Invoices", tableHTML);
@@ -330,7 +348,7 @@ const [paymentData, setPaymentData] = useState(null);
         if (isPaid) {
           return <input type="checkbox" checked={true} readOnly onClick={e => e.stopPropagation()} className="accent-green-500 cursor-not-allowed" />;
         }
-        return <input type="checkbox" checked={selected.includes(r._id)} onChange={() => toggleRow(r._id)} onClick={e => e.stopPropagation()} />;
+        return <input type="checkbox" checked={selected.includes(String(r._id))} onChange={() => toggleRow(r._id)} onClick={e => e.stopPropagation()} />;
       },
     },
     { key: "invoice_date", label: "Date", sortable: true, render: r => fmtDate(r.invoice_date) },
@@ -495,17 +513,227 @@ if (showSuccess) {
   );
 }
 
+
+
+
+
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
-function ProfileTab({ vendor }) {
-  const addr = [vendor.address_line_1, vendor.city, vendor.state, vendor.pincode].filter(Boolean).join(", ");
+
+
+
+
+// ── Edit Vendor Modal ─────────────────────────────────────────────────────────
+
+
+const EditField = ({ label, fieldKey, type = "text", placeholder = "", form, set }) => (
+  <div>
+    <label className="text-[11.5px] text-gray-400 mb-1 block">{label}</label>
+    <input
+      type={type}
+      value={form[fieldKey]}
+      onChange={e => set(fieldKey, e.target.value)}
+      placeholder={placeholder}
+      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-[13px] text-gray-800 focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 transition"
+    />
+  </div>
+);
+
+function EditVendorModal({ vendor, onClose, onSave }) {
+const [form, setForm] = useState(() => ({
+  vendor_name: vendor.vendor_name || "",
+  party_type: vendor.party_type || "Supplier",
+  contact_no_1: vendor.contact_no_1 || "",
+  email: vendor.email || "",
+  opening_balance: vendor.opening_balance ?? 0,
+  gstin: vendor.gstin || "",
+  pan_number: vendor.pan_number || "",
+
+  
+  address_line_1: vendor.address_line_1 || "",
+  city: vendor.city || "",
+  state: vendor.state || "",
+  pincode: vendor.pincode || "",
+
+
+  shipping_address_line_1: vendor.shipping_address_line_1 || "",
+  shipping_city: vendor.shipping_city || "",
+  shipping_state: vendor.shipping_state || "",
+  shipping_pincode: vendor.shipping_pincode || "",
+}));
+
+  const [saving, setSaving] = useState(false);
+
+  const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }));
+
+const handleSave = async () => {
+  if (!form.vendor_name.trim()) {
+    alert("Vendor name is required");
+    return;
+  }
+
+  setSaving(true);
+
+  try {
+    const payload = {
+      ...form,
+      opening_balance: Number(form.opening_balance || 0), // ✅ FIX
+    };
+
+    const res = await axios.put(
+      `http://localhost:8000/api/vendor/${vendor._id}`,
+      payload
+    );
+
+if (res.data.success) {
+  const updatedVendor = res.data.data;
+
+  if (updatedVendor) {
+    onSave(updatedVendor);
+  } else {
+    onSave({
+      ...vendor,
+      ...payload,
+    });
+  }
+} else {
+      alert("Failed to save changes");
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Server error while saving");
+  } finally {
+    setSaving(false);
+  }
+};
+
+
+
   return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-[620px] max-h-[85vh] flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-[15px] font-semibold text-gray-800">Edit Vendor</h2>
+          <button onClick={onClose} className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:bg-gray-100 text-lg leading-none">×</button>
+        </div>
+
+      {/* Body */}
+<div className="overflow-y-auto px-6 py-5 space-y-5 flex-1">
+
+  {/* General */}
+  <div>
+    <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
+      General Details
+    </p>
+
+    <div className="grid grid-cols-2 gap-4">
+      <EditField label="Vendor Name *" fieldKey="vendor_name" form={form} set={set} />
+      <EditField label="Party Type" fieldKey="party_type" form={form} set={set} />
+      <EditField label="Mobile Number" fieldKey="contact_no_1" form={form} set={set} />
+
+      <div className="col-span-2">
+        <EditField label="Email" fieldKey="email" type="email" form={form} set={set} />
+      </div>
+
+      <EditField label="Opening Balance" fieldKey="opening_balance" type="number" form={form} set={set} />
+    </div>
+  </div>
+
+  {/* Business */}
+  <div>
+    <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
+      Business Details
+    </p>
+
+    <div className="grid grid-cols-2 gap-4">
+      <EditField label="GSTIN" fieldKey="gstin" form={form} set={set} />
+      <EditField label="PAN Number" fieldKey="pan_number" form={form} set={set} />
+    </div>
+  </div>
+
+  {/* Address */}
+  <div>
+    <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
+      Billing Address
+    </p>
+
+    <div className="grid grid-cols-2 gap-4">
+      <div className="col-span-2">
+        <EditField label="Address Line 1" fieldKey="address_line_1" form={form} set={set} />
+      </div>
+
+      <EditField label="City" fieldKey="city" form={form} set={set} />
+      <EditField label="State" fieldKey="state" form={form} set={set} />
+      <EditField label="Pincode" fieldKey="pincode" form={form} set={set} />
+    </div>
+  </div>
+
+  {/* Shipping Address */}
+<div>
+  <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
+    Shipping Address
+  </p>
+
+  <div className="grid grid-cols-2 gap-4">
+    <div className="col-span-2">
+      <EditField label="Address Line 1" fieldKey="shipping_address_line_1" form={form} set={set} />
+    </div>
+
+    <EditField label="City" fieldKey="shipping_city" form={form} set={set} />
+    <EditField label="State" fieldKey="shipping_state" form={form} set={set} />
+    <EditField label="Pincode" fieldKey="shipping_pincode" form={form} set={set} />
+  </div>
+</div>
+
+</div>
+        {/* Footer */}
+        <div className="flex gap-3 px-6 py-4 border-t border-gray-100">
+          <button onClick={onClose}
+            className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition">
+            Cancel
+          </button>
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
+            {saving ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ProfileTab({ vendor, onVendorUpdate }) {
+  const [showEdit, setShowEdit] = useState(false);
+    const addr = [vendor.address_line_1, vendor.city, vendor.state, vendor.pincode].filter(Boolean).join(", ");
+    const shippingAddr = [
+  vendor.shipping_address_line_1,
+  vendor.shipping_city,
+  vendor.shipping_state,
+  vendor.shipping_pincode
+].filter(Boolean).join(", ");
+  return (
+      <div className="space-y-4">
+
+      {/* 🔥 TOP HEADER WITH EDIT BUTTON */}
+      <div className="flex justify-end">
+        <button
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg bg-white hover:bg-gray-50 transition"
+        onClick={() => setShowEdit(true)}
+        >
+          <Ico.Edit />
+          Edit
+        </button>
+      </div>
     <div className="grid grid-cols-2 gap-4">
       <ProfileCard title="General Details" icon={Ico.Doc}>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
           <PField label="Party Name"     value={vendor.vendor_name} />
           <PField label="Party Type"     value={vendor.party_type || "Supplier"} />
           <PField label="Mobile Number"  value={vendor.contact_no_1} />
-          <PField label="Party Category" value={vendor.party_category} />
         </div>
         <div className="mb-3"><PField label="Email" value={vendor.email} /></div>
         <PField label="Opening Balance" value={`₹${vendor.opening_balance ?? 0}`} />
@@ -519,14 +747,14 @@ function ProfileTab({ vendor }) {
           <p className="text-[11.5px] text-gray-400 mb-0.5">Billing Address</p>
           <p className="text-[13px] font-medium text-gray-900">{addr || "-"}</p>
         </div>
-        <div className="mb-3">
-          <p className="text-[11.5px] text-gray-400 mb-0.5">Shipping Address</p>
-          <p className="text-[13px] font-medium text-gray-900">{vendor.vendor_name}</p>
-          <p className="text-[13px] text-gray-700">{addr || "-"}</p>
-        </div>
-        <span className="text-[13px] font-medium text-indigo-600 cursor-pointer hover:underline">Manage Shipping Addresses (1)</span>
+       <div className="mb-3">
+  <p className="text-[11.5px] text-gray-400 mb-0.5">Shipping Address</p>
+  <p className="text-[13px] font-medium text-gray-900">
+    {shippingAddr || "-"}
+  </p>
+</div>
       </ProfileCard>
-      <div className="border border-gray-200 rounded-xl p-5 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition col-span-1">
+      {/* <div className="border border-gray-200 rounded-xl p-5 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition col-span-1">
         <div className="flex items-center gap-3">
           <Ico.Bank />
           <div>
@@ -535,12 +763,24 @@ function ProfileTab({ vendor }) {
           </div>
         </div>
         <button className="w-7 h-7 rounded-full border border-gray-300 bg-white flex items-center justify-center text-gray-600 hover:bg-gray-100 flex-shrink-0"><Ico.Plus /></button>
-      </div>
+      </div> */}
+    </div>
+
+    {showEdit && (
+          <EditVendorModal
+            vendor={vendor}
+            onClose={() => setShowEdit(false)}
+            onSave={(updated) => {
+              onVendorUpdate(updated);
+              setShowEdit(false);
+            }}
+          />
+        )}
     </div>
   );
 }
 
-// ── Tab: Ledger ───────────────────────────────────────────────────────────────
+// ── Tab: Ledger ──────────────────────────────────────────────────────────────
 function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -678,6 +918,31 @@ export default function VendorDetails() {
   const [vendor, setVendor]       = useState(null);
   const [activeTab, setActiveTab] = useState("invoices");
 
+
+  const handleDelete = async () => {
+  const confirmDelete = window.confirm(
+    "Are you sure you want to delete this vendor permanently?"
+  );
+
+  if (!confirmDelete) return;
+
+  try {
+    const res = await axios.delete(
+      `http://localhost:8000/api/vendor/${id}`
+    );
+
+    if (res.data.success) {
+      alert("Vendor deleted successfully");
+      navigate(-1);
+    } else {
+      alert("Failed to delete vendor");
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Server error while deleting");
+  }
+};
+
   const [filters, setFilters] = useState({
     invoices: { show: false, selected: "Last 365 Days", hovered: null },
     payments: { show: false, selected: "Last 365 Days", hovered: null },
@@ -727,9 +992,12 @@ export default function VendorDetails() {
           <span className="text-[17px] font-semibold text-gray-900">{vendor.vendor_name}</span>
         </div>
         <div className="flex items-center gap-2">
-          <ActionBtn icon={Ico.Edit}  label="Edit" />
-          <ActionBtn icon={Ico.Trash} danger square />
-        </div>
+<ActionBtn
+  icon={Ico.Trash}
+  danger
+  square
+  onClick={handleDelete}
+/>        </div>
       </div>
 
       <div className="flex justify-between px-6 border-b border-gray-200">
@@ -752,7 +1020,14 @@ export default function VendorDetails() {
       <div className="p-6">
         {activeTab === "invoices" && <TransactionsTab vendorId={id} showFilter={filters.invoices.show} setShowFilter={v => updateFilter("invoices","show",v)} selectedFilter={filters.invoices.selected} setSelectedFilter={v => updateFilter("invoices","selected",v)} hoveredFilter={filters.invoices.hovered} setHoveredFilter={v => updateFilter("invoices","hovered",v)} filterRef={filterRef} />}
         {activeTab === "payments" && <PaymentsTab     vendorId={id} showFilter={filters.payments.show} setShowFilter={v => updateFilter("payments","show",v)} selectedFilter={filters.payments.selected} setSelectedFilter={v => updateFilter("payments","selected",v)} hoveredFilter={filters.payments.hovered} setHoveredFilter={v => updateFilter("payments","hovered",v)} filterRef={filterRef} />}
-        {activeTab === "profile"  && <ProfileTab vendor={vendor} />}
+{activeTab === "profile" && (
+<ProfileTab
+  vendor={vendor}
+  onVendorUpdate={(updated) => {
+    setVendor(updated);   // ✅ instant UI update
+  }}
+/>
+)}
         {activeTab === "ledger"   && <LedgerTab   vendor={vendor} vendorId={id} showFilter={filters.ledger.show} setShowFilter={v => updateFilter("ledger","show",v)} selectedFilter={filters.ledger.selected} setSelectedFilter={v => updateFilter("ledger","selected",v)} hoveredFilter={filters.ledger.hovered} setHoveredFilter={v => updateFilter("ledger","hovered",v)} filterRef={filterRef} />}
       </div>
     </div>

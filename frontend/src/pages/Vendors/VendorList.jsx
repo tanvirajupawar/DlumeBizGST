@@ -54,14 +54,46 @@ const VendorList = () => {
     }
   };
 
+
+  const fetchVendorInvoices = async (vendorId) => {
+  try {
+    const res = await axios.get(
+      `http://localhost:8000/api/purchase?vendor_id=${vendorId}`
+    );
+    return res.data.data || [];
+  } catch (err) {
+    console.error("Invoice fetch error:", err);
+    return [];
+  }
+};
+
+
+const handleOpenPayment = async (row, e) => {
+  e.stopPropagation();
+
+  // 🔥 fetch invoices
+  const invoices = await fetchVendorInvoices(row.id);
+
+  // 🔥 attach invoices to vendor
+  setSelectedVendor({
+    ...row,
+    invoices
+  });
+
+  setShowPayModal(true);
+};
+
 const handleSavePayment = async () => {
   try {
-    const payload = {
-     vendor_id: selectedVendor.id || selectedVendor._id,
-      amount: Number(paymentAmount),
-      payment_mode: paymentMode,
-      remark: remark || ""
-    };
+const payload = {
+  vendor_id: selectedVendor.id || selectedVendor._id,
+  amount: Number(paymentAmount),
+  payment_mode: paymentMode,
+  remark: remark || "",
+
+  
+  invoice_ids: selectedVendor.invoices?.map(inv => inv._id) || []
+};
 
     console.log("💰 PAYMENT PAYLOAD:", payload);
 
@@ -188,11 +220,7 @@ phone: v.contact_no_1 || "-",
 
   renderActions={(row) => (
     <button
-      onClick={(e) => {
-        e.stopPropagation();
-        setSelectedVendor(row);
-        setShowPayModal(true);
-      }}
+  onClick={(e) => handleOpenPayment(row, e)}
       className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-green-600 border border-green-200 hover:bg-green-50 transition"
     >
       <TbWallet size={15} />
@@ -200,22 +228,7 @@ phone: v.contact_no_1 || "-",
     </button>
   )}
 
-onDelete={async (row) => {
-  const confirmDelete = window.confirm("Are you sure you want to delete this vendor?");
-  if (!confirmDelete) return;
-
-  try {
-    await axios.delete(`http://localhost:8000/api/vendor/${row.id}`);
-
-    // remove from UI instantly
-    setVendors((prev) => prev.filter((v) => v._id !== row.id));
-
-    alert("Vendor deleted successfully");
-  } catch (err) {
-    console.error(err);
-    alert("Failed to delete vendor");
-  }
-}}/>
+/>
 
       {/* Payment Modal */}
       {showPayModal && (

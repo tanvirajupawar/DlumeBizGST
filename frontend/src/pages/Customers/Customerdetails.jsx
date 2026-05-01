@@ -54,10 +54,11 @@ const getDateRange = (filter) => {
 };
 
 // ── helper: get balance for a row ─────────────────────────────────────────────
-const getBalance = (r) =>
-  r.balance_amount !== undefined && r.balance_amount !== null
-    ? Number(r.balance_amount)
-    : Number(r.total_amount || 0);
+const getBalance = (r) => {
+  const total = Number(r.total_amount || 0);
+  const paid  = Number(r.paid_amount || 0);
+  return total - paid;
+};
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 const DateFilter = ({ showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) => (
@@ -260,7 +261,7 @@ function ReceiveModal({ invoices, customerId, onClose, onSuccess }) {
 }
 
 // ── Tab: Transactions ─────────────────────────────────────────────────────────
-function TransactionsTab({ customerId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+function TransactionsTab({ customerId,customerName, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
   const [invoices, setInvoices]               = useState([]);
   const [loading, setLoading]                 = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
@@ -450,10 +451,10 @@ function TransactionsTab({ customerId, showFilter, setShowFilter, selectedFilter
               amount: data.amount,
               method: data.payment_mode,
               date: new Date().toLocaleDateString("en-GB"),
-              customer: {
-                first_name: "Customer",
-                contact_no_1: "",
-              },
+          customer: {
+  first_name: customerName,
+  contact_no_1: "",
+},
             });
             setShowSuccess(true);
           }}
@@ -512,9 +513,193 @@ function TransactionsTab({ customerId, showFilter, setShowFilter, selectedFilter
 }
 
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
+
+
+function EditCustomerModal({ customer, onClose, onSave }) {
+
+  const [form, setForm] = useState(() => ({
+    customer_name: customer.customer_name || "",
+    first_name: customer.first_name || "",
+    last_name: customer.last_name || "",
+    party_type: customer.party_type || "Customer",
+    contact_no_1: customer.contact_no_1 || "",
+    email: customer.email || "",
+    opening_balance: customer.opening_balance ?? 0,
+    gstin: customer.gstin || "",
+    pan_number: customer.pan_number || "",
+
+    address_line_1: customer.address_line_1 || "",
+    city: customer.city || "",
+    state: customer.state || "",
+    pincode: customer.pincode || "",
+
+    shipping_address_line_1: customer.shipping_address_line_1 || "",
+    shipping_city: customer.shipping_city || "",
+    shipping_state: customer.shipping_state || "",
+    shipping_pincode: customer.shipping_pincode || "",
+  }));
+
+  const [saving, setSaving] = useState(false);
+
+  const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }));
+
+  const handleSave = async () => {
+    if (!form.customer_name && !form.first_name) {
+      alert("Customer name is required");
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const payload = {
+        ...form,
+        opening_balance: Number(form.opening_balance || 0),
+      };
+
+      const res = await axios.put(
+        `http://localhost:8000/api/customers/${customer._id}`,
+        payload
+      );
+
+      if (res.data.success) {
+        const updatedCustomer = res.data.data;
+
+        if (updatedCustomer) {
+          onSave(updatedCustomer);
+        } else {
+          onSave({
+            ...customer,
+            ...payload,
+          });
+        }
+      } else {
+        alert("Failed to save changes");
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert("Server error while saving");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-[620px] max-h-[85vh] flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-[15px] font-semibold text-gray-800">Edit Customer</h2>
+          <button onClick={onClose}
+            className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:bg-gray-100 text-lg">
+            ×
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto px-6 py-5 space-y-5 flex-1">
+
+          {/* General */}
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
+              General Details
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <EditField label="Customer Name" fieldKey="customer_name" form={form} set={set} />
+              <EditField label="First Name" fieldKey="first_name" form={form} set={set} />
+              <EditField label="Last Name" fieldKey="last_name" form={form} set={set} />
+              <EditField label="Mobile Number" fieldKey="contact_no_1" form={form} set={set} />
+
+              <div className="col-span-2">
+                <EditField label="Email" fieldKey="email" type="email" form={form} set={set} />
+              </div>
+
+              <EditField label="Opening Balance" fieldKey="opening_balance" type="number" form={form} set={set} />
+            </div>
+          </div>
+
+          {/* Business */}
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
+              Business Details
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <EditField label="GSTIN" fieldKey="gstin" form={form} set={set} />
+              <EditField label="PAN Number" fieldKey="pan_number" form={form} set={set} />
+            </div>
+          </div>
+
+          {/* Billing Address */}
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
+              Billing Address
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <EditField label="Address Line 1" fieldKey="address_line_1" form={form} set={set} />
+              </div>
+
+              <EditField label="City" fieldKey="city" form={form} set={set} />
+              <EditField label="State" fieldKey="state" form={form} set={set} />
+              <EditField label="Pincode" fieldKey="pincode" form={form} set={set} />
+            </div>
+          </div>
+
+          {/* Shipping */}
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
+              Shipping Address
+            </p>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <EditField label="Address Line 1" fieldKey="shipping_address_line_1" form={form} set={set} />
+              </div>
+
+              <EditField label="City" fieldKey="shipping_city" form={form} set={set} />
+              <EditField label="State" fieldKey="shipping_state" form={form} set={set} />
+              <EditField label="Pincode" fieldKey="shipping_pincode" form={form} set={set} />
+            </div>
+          </div>
+
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-3 px-6 py-4 border-t border-gray-100">
+          <button onClick={onClose}
+            className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">
+            Cancel
+          </button>
+
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+            {saving ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+
 function ProfileTab({ customer }) {
   const addr = [customer.address_line_1, customer.city, customer.state, customer.pincode].filter(Boolean).join(", ");
   const name = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
+  const shippingAddr = [
+  customer.shipping_address_line_1,
+  customer.shipping_city,
+  customer.shipping_state,
+  customer.shipping_pincode
+].filter(Boolean).join(", ");
   return (
     <div className="grid grid-cols-2 gap-4">
       <ProfileCard title="General Details" icon={Ico.Doc}>
@@ -522,7 +707,6 @@ function ProfileTab({ customer }) {
           <PField label="Party Name"     value={name} />
           <PField label="Party Type"     value={customer.party_type || "Customer"} />
           <PField label="Mobile Number"  value={customer.contact_no_1 || customer.phone} />
-          <PField label="Party Category" value={customer.party_category} />
         </div>
         <div className="mb-3"><PField label="Email" value={customer.email} /></div>
         <PField label="Opening Balance" value={`₹${customer.opening_balance ?? 0}`} />
@@ -538,10 +722,10 @@ function ProfileTab({ customer }) {
         </div>
         <div className="mb-3">
           <p className="text-[11.5px] text-gray-400 mb-0.5">Shipping Address</p>
-          <p className="text-[13px] font-medium text-gray-900">{name}</p>
-          <p className="text-[13px] text-gray-700">{addr || "-"}</p>
+         <p className="text-[13px] font-medium text-gray-900">
+  {shippingAddr || "-"}
+</p>
         </div>
-        <span className="text-[13px] font-medium text-indigo-600 cursor-pointer hover:underline">Manage Shipping Addresses (1)</span>
       </ProfileCard>
       <div className="border border-gray-200 rounded-xl p-5 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition col-span-1">
         <div className="flex items-center gap-3">
@@ -701,12 +885,38 @@ export default function CustomerDetails() {
   const navigate   = useNavigate();
   const [customer, setCustomer]   = useState(null);
   const [activeTab, setActiveTab] = useState("invoices");
+  const [showEdit, setShowEdit] = useState(false);
 
   const [filters, setFilters] = useState({
     invoices: { show: false, selected: "Last 365 Days", hovered: null },
     payments: { show: false, selected: "Last 365 Days", hovered: null },
     ledger:   { show: false, selected: "Last 365 Days", hovered: null },
   });
+
+const handleDelete = async () => {
+  const confirmDelete = window.confirm(
+    "Are you sure you want to delete this customer permanently?"
+  );
+
+  if (!confirmDelete) return;
+
+  try {
+    const res = await axios.delete(
+      `http://localhost:8000/api/customers/${id}`
+    );
+
+    if (res.data.success) {
+      alert("Customer deleted successfully");
+      navigate(-1);
+    } else {
+      alert("Failed to delete customer");
+    }
+  } catch (err) {
+    console.error(err);
+    alert("Server error while deleting");
+  }
+};
+
   const updateFilter = (tab, key, value) => setFilters(prev => ({ ...prev, [tab]: { ...prev[tab], [key]: value } }));
   const filterRef = useRef(null);
 
@@ -757,8 +967,12 @@ export default function CustomerDetails() {
           <span className="text-[17px] font-semibold text-gray-900">{customerName}</span>
         </div>
         <div className="flex items-center gap-2">
-          <ActionBtn icon={Ico.Edit}  label="Edit" />
-          <ActionBtn icon={Ico.Trash} danger square />
+<ActionBtn
+  icon={Ico.Edit}
+  label="Edit"
+  onClick={() => setShowEdit(true)}
+/>
+          <ActionBtn icon={Ico.Trash} danger square onClick={handleDelete} />
         </div>
       </div>
 
@@ -783,6 +997,7 @@ export default function CustomerDetails() {
         {activeTab === "invoices" && (
           <TransactionsTab
             customerId={id}
+              customerName={customerName}
             showFilter={filters.invoices.show}       setShowFilter={v => updateFilter("invoices","show",v)}
             selectedFilter={filters.invoices.selected} setSelectedFilter={v => updateFilter("invoices","selected",v)}
             hoveredFilter={filters.invoices.hovered}  setHoveredFilter={v => updateFilter("invoices","hovered",v)}
@@ -810,6 +1025,16 @@ export default function CustomerDetails() {
           />
         )}
       </div>
+      {showEdit && (
+  <EditCustomerModal
+    customer={customer}
+    onClose={() => setShowEdit(false)}
+    onSave={(updated) => {
+      setCustomer(updated);
+      setShowEdit(false);
+    }}
+  />
+)}
     </div>
   );
 }

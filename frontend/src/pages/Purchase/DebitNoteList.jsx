@@ -5,6 +5,8 @@ import { FiPlus, FiTrash2, FiSearch, FiX, FiFileText, FiEdit2 } from "react-icon
 import { HiOutlineCalendar } from "react-icons/hi";
 import Button from "../../components/Button";
 import DebitNoteDetailPanel from "../../components/DebitNoteDetailPanel";
+import DateFilter from "../../components/DateFilter";
+import { applyDateFilter } from "../../components/DateFilter";
 
 
 const fmt = (n) =>
@@ -12,37 +14,7 @@ const fmt = (n) =>
 
 const DATE_FILTERS = ["Last 30 Days", "Last 90 Days", "Last 365 Days", "All Time"];
 
-/* ─── Date Filter Dropdown ─── */
-const DateFilter = ({ selected, onChange }) => {
-  const [open, setOpen] = useState(false);
 
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white hover:bg-gray-50 transition"
-      >
-        <HiOutlineCalendar size={15} className="text-gray-400" />
-        <span className="text-gray-600">{selected}</span>
-      </button>
-
-      {open && (
-        <div className="absolute top-10 left-0 bg-white border border-gray-200 rounded-xl shadow-lg w-44 z-20 py-1">
-          {DATE_FILTERS.map((f) => (
-            <button
-              key={f}
-              onClick={() => { onChange(f); setOpen(false); }}
-              className={`block w-full text-left px-4 py-2 text-sm transition
-                ${selected === f ? "text-[#1e3a8a] font-medium bg-blue-50" : "text-gray-600 hover:bg-gray-50"}`}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
 
 
 
@@ -69,7 +41,15 @@ const DebitNoteList = () => {
 companyName: n.vendor_id?.company_name || "",
 customerName: n.vendor_id?.vendor_name || "",
   invoiceNo: n.purchase_id?.supplier_invoice_no || "-",
-  date: new Date(n.date).toLocaleDateString("en-GB"),
+date: n.date, 
+formattedDate: new Date(n.date)
+  .toLocaleDateString("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+  .replace(/\//g, "-"),
   amount: n.amount || 0,
   reason: n.reason || "",
 
@@ -104,12 +84,14 @@ customerName: n.vendor_id?.vendor_name || "",
     }
   };
 
-  const filteredNotes = notes.filter((n) =>
-(n.companyName || "").toLowerCase().includes(search.toLowerCase()) ||
-(n.customerName || "").toLowerCase().includes(search.toLowerCase()) ||
-    (n.debitNo || "").toLowerCase().includes(search.toLowerCase()) ||
-    (n.invoiceNo || "").toLowerCase().includes(search.toLowerCase())
-  );
+const dateFiltered = applyDateFilter(notes, "date", dateFilter);
+
+const filteredNotes = dateFiltered.filter((n) =>
+  (n.companyName || "").toLowerCase().includes(search.toLowerCase()) ||
+  (n.customerName || "").toLowerCase().includes(search.toLowerCase()) ||
+  (n.debitNo || "").toLowerCase().includes(search.toLowerCase()) ||
+  (n.invoiceNo || "").toLowerCase().includes(search.toLowerCase())
+);
 
   const totalAmount = notes.reduce((s, n) => s + n.amount, 0);
 
@@ -117,18 +99,22 @@ customerName: n.vendor_id?.vendor_name || "",
     <div className="space-y-5">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between gap-3">
-        <DateFilter selected={dateFilter} onChange={setDateFilter} />
+   <div className="flex items-center justify-between gap-3">
 
-        <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-lg px-4 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-            Total Debit Notes
-          </p>
-          <p className="text-sm font-bold text-green-600 tabular-nums">
-            {fmt(totalAmount)}
-          </p>
-        </div>
-      </div>
+  {/* LEFT → TOTAL */}
+  <div className="flex items-center gap-3 bg-green-50 border border-green-100 rounded-lg px-4 py-2">
+    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
+      Total Debit Notes
+    </p>
+    <p className="text-sm font-bold text-green-600 tabular-nums">
+      {fmt(totalAmount)}
+    </p>
+  </div>
+
+  {/* RIGHT → FILTER */}
+  <DateFilter value={dateFilter} onChange={setDateFilter} />
+
+</div>
 
       {/* ── Table ── */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-visible">
@@ -187,7 +173,7 @@ customerName: n.vendor_id?.vendor_name || "",
                 onClick={() => setSelectedNote(note)}
               >
                 <div className="py-4">
-                  <p className="text-sm text-gray-500">{note.date}</p>
+                  <p className="text-sm text-gray-500">{note.formattedDate}</p>
                 </div>
                 <div className="py-4 pr-4">
                   <p className="text-sm font-mono text-gray-500">{note.debitNo}</p>

@@ -27,20 +27,38 @@ const clientController = {
       const total = await clientModel.countDocuments(filter);
 
       // Fetch filtered and paginated clients
-      const clients = await clientModel
-        .find(filter)
-        .populate("company_id")
-        .skip(skip)
-        .limit(limit)
-        .exec();
+const clients = await clientModel
+  .find(filter)
+  .populate("company_id")
+  .lean();
 
-      return res.json({
-        success: true,
-        data: clients,
-        total,
-        page,
-        totalPages: Math.ceil(total / limit),
-      });
+const result = await Promise.all(
+  clients.map(async (c) => {
+
+    const invoices = await SaleOrderModel.find({
+      client_id: c._id
+    });
+
+    const outstanding = invoices.reduce((sum, inv) => {
+      const total = Number(inv.total_amount || 0);
+      const paid  = Number(inv.paid_amount || 0);
+      return sum + (total - paid);
+    }, 0);
+
+    return {
+      ...c,
+      pending_amount: outstanding
+    };
+  })
+);
+
+return res.json({
+  success: true,
+  data: result,
+  total,
+  page,
+  totalPages: Math.ceil(total / limit),
+});
     } catch (error) {
       return res.status(500).json({
         success: false,
@@ -72,12 +90,23 @@ const data = {
   address_line_1: body.customer_address_line1,
   address_line_2: body.customer_address_line2 || "",
 
-  gst: body.customer_gstin || "",   
-  pan: body.customer_pan || "",
+  // ✅ FIXED
+  gstin: body.customer_gstin || "",
+  pan_number: body.customer_pan || "",
 
   city: body.customer_city,
   state: body.customer_state,
   pincode: body.customer_pincode,
+
+  // ✅ ADD THIS
+  shipping_address_line_1: body.shipping_address_line_1 || "",
+  shipping_city: body.shipping_city || "",
+  shipping_state: body.shipping_state || "",
+  shipping_pincode: body.shipping_pincode || "",
+
+  // ✅ ADD THIS
+  opening_balance: body.opening_balance || 0,
+  pending_amount: body.opening_balance || 0,
 };
 
     console.log("Mapped Data:", data); // debug
@@ -150,6 +179,7 @@ const data = {
       clientObj.totalAmount = totalAmount;
       clientObj.paidAmount = paidAmount;
       clientObj.outstandingAmount = outstandingAmount;
+      clientObj.pending_amount = outstandingAmount;
 
       return res.json({
         success: true,

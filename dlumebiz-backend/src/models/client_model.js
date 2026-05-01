@@ -2,69 +2,42 @@ const { Schema, model, Types } = require("mongoose");
 const SaleOrderModel = require("../models/sale_order_model");
 
 const clientSchema = new Schema({
-  first_name: {
-    type: String,
-    required: true,
-  },
-  last_name: {
-    type: String,
-  },
-  email: {
-    type: String,
-  },
-  contact_no_1: {
-    type: String,
-  },
-  contact_no_2: {
-    type: String,
-    default: "",
-  },
-  address_line_1: {
-    type: String,
-    default: "",
-  },
-  address_line_2: {
-    type: String,
-    default: "",
-  },
-  city: {
-    type: String,
-    default: "",
-  },
-  state: {
-    type: String,
-    default: "",
-  },
-  country: {
-    type: String,
-    default: "",
-  },
-  pincode: {
-    type: String,
-    default: "",
-  },
-  customer_type: {
-    type: String,
-    default: "",
-  },
-  company_name: {
-    type: String,
-    default: "",
-  },
-  gst: {
-    type: String,
-    default: "",
-  },
-  pan: {
-    type: String,
-    default: "",
-  },  
+
+  first_name: { type: String, required: true },
+  last_name: { type: String },
+
+  email: { type: String },
+  contact_no_1: { type: String },
+  contact_no_2: { type: String, default: "" },
+
+  address_line_1: { type: String, default: "" },
+  address_line_2: { type: String, default: "" },
+  city: { type: String, default: "" },
+  state: { type: String, default: "" },
+  country: { type: String, default: "" },
+  pincode: { type: String, default: "" },
+
+  // ✅ FIXED
+  gstin: { type: String, default: "" },
+  pan_number: { type: String, default: "" },
+
+  // ✅ NEW
+  shipping_address_line_1: { type: String, default: "" },
+  shipping_city: { type: String, default: "" },
+  shipping_state: { type: String, default: "" },
+  shipping_pincode: { type: String, default: "" },
+
+  // ✅ NEW
+  opening_balance: { type: Number, default: 0 },
+
   pending_amount: {
     type: Number,
     default: 0,
     min: 0,
-  }, 
+  },
+
   company_id: { type: Types.ObjectId, ref: "Company" },
+
   createdOn: { type: Date, default: Date.now },
   updatedOn: { type: Date, default: Date.now },
 });

@@ -9,6 +9,8 @@ exports.getItems = async (req, res) => {
 
    const stockMap = new Map();
 
+   const stock = await StockManagementModel.find({ company_id });
+
 stock.forEach((s) => {
   stockMap.set(s.product_id?.toString(), s);
 });
@@ -16,23 +18,25 @@ stock.forEach((s) => {
 const final = products.map((p) => {
   const s = stockMap.get(p._id.toString());
 
-  return {
-    id: p._id,
-    product: p.name,
-    hsn: p.hsn || "",
-    type: p.type || "",
-    size: p.size || "",
-    purchasePrice: p.purchased_price || 0,
-    mrp: p.mrp || 0,
+return {
+  id: p._id,
+  product: p.product,   // 🔥 FIX THIS
+  barcode: p.barcode || "", // 🔥 ADD THIS
 
-    in: s?.in || 0,
-    out: s?.out || 0,
-    total: s?.total_stock || 0,
+  hsn: p.hsn || "",
+  type: p.type || "",
+  size: p.size || "",
+  purchasePrice: p.purchase_price || 0,
+  mrp: p.mrp || 0,
 
-    unit: p.unit || "PCS",
-    category: p.category || "",
-code: p.code || "",
-  };
+  in: s?.in || 0,
+  out: s?.out || 0,
+  total: s?.total_stock || 0,
+
+  unit: p.unit || "PCS",
+  category: p.category || "",
+  code: p.code || "",
+};
 });
     return res.json({
       success: true,

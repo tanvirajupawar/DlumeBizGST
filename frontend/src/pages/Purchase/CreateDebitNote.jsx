@@ -166,15 +166,7 @@ const CreateDebitNote = () => {
   const [rows, setRows] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Additional charges
-  const [additionalCharges, setAdditionalCharges] = useState(0);
 
-  // Payment
-  const [amountPaid, setAmountPaid] = useState(0);
-  const [paymentMode, setPaymentMode] = useState("Cash");
-  const [markFullyPaid, setMarkFullyPaid] = useState(false);
-  const [autoRoundOff, setAutoRoundOff] = useState(false);
-  const [discount, setDiscount] = useState(0);
 
   // Load items from invoice
   useEffect(() => {
@@ -192,10 +184,7 @@ const CreateDebitNote = () => {
       .catch(() => setDebitNoteNumber("DN-001"));
   }, []);
 
-  // Sync mark fully paid
-  useEffect(() => {
-    if (markFullyPaid) setAmountPaid(totalAmount);
-  }, [markFullyPaid]);
+
 
   const handleVendorChange = (v) => { setVendor(v); setInvoice(null); };
 
@@ -210,13 +199,7 @@ const CreateDebitNote = () => {
 
   const taxableAmount = rows.reduce((s, r) => s + r.qty * r.newPrice, 0);
   const gstAmount     = rows.reduce((s, r) => s + (r.qty * r.newPrice * (r.gst_percent || 0)) / 100, 0);
-  const discountAmt   = (taxableAmount * discount) / 100;
-  const roundOffVal   = autoRoundOff
-    ? Math.round(taxableAmount + gstAmount + Number(additionalCharges || 0) - discountAmt) -
-      (taxableAmount + gstAmount + Number(additionalCharges || 0) - discountAmt)
-    : 0;
-  const totalAmount   = taxableAmount + gstAmount + Number(additionalCharges || 0) - discountAmt + roundOffVal;
-  const balanceAmount = totalAmount - Number(amountPaid || 0);
+const totalAmount = taxableAmount + gstAmount;
   const hasItems      = rows.length > 0;
 
   const handleSubmit = async () => {
@@ -237,10 +220,7 @@ const CreateDebitNote = () => {
           price: r.newPrice,
           amount: r.qty * r.newPrice,
         })),
-        additional_charges: additionalCharges,
-        discount,
-        amount_paid: amountPaid,
-        payment_mode: paymentMode,
+   
         amount: totalAmount,
         total_amount: totalAmount,
       });
@@ -264,16 +244,54 @@ const CreateDebitNote = () => {
           <div className="p-5">
             <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Bill From</p>
             <VendorSelector value={vendor} onChange={handleVendorChange} />
-            {vendor && (
-              <div className="mt-3 space-y-0.5">
-                {vendor.gstin && <p className="text-xs text-gray-500 font-mono">GSTIN: {vendor.gstin}</p>}
-                <div className="text-xs text-gray-500 leading-relaxed">
-                  {[vendor.address_line_1, vendor.address_line_2].filter(Boolean).join(", ")}
-                  <br />
-                  {[vendor.city, vendor.state, vendor.pincode].filter(Boolean).join(", ")}
-                </div>
-              </div>
-            )}
+          {vendor && (
+  <div className="mt-3 flex flex-col gap-1">
+
+    {/* Name */}
+    <p className="text-sm font-bold text-gray-900">
+      {vendor.vendor_name || vendor.company_name}
+    </p>
+
+    {/* Company */}
+    {vendor.company_name && (
+      <p className="text-xs text-gray-500">
+        {vendor.company_name}
+      </p>
+    )}
+
+    {/* Phone */}
+    {vendor.phone && (
+      <p className="text-xs text-gray-700">
+        Phone: <span className="font-semibold">{vendor.phone}</span>
+      </p>
+    )}
+
+    {/* GST Badge */}
+    {vendor.gstin && (
+      <span className="inline-block mt-1 text-[11px] font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+        {vendor.gstin}
+      </span>
+    )}
+
+    {/* Address */}
+    {(vendor.address_line_1 || vendor.city) && (
+      <p className="text-xs text-gray-500 leading-relaxed mt-1">
+        {[vendor.address_line_1, vendor.address_line_2]
+          .filter(Boolean)
+          .join(", ")}
+
+        {(vendor.city || vendor.state) && <br />}
+
+        {[vendor.city, vendor.state]
+          .filter(Boolean)
+          .join(", ")}
+
+        {vendor.pincode && <> — {vendor.pincode}</>}
+      </p>
+    )}
+
+  </div>
+)}
           </div>
 
           {/* LINK INVOICE */}
@@ -413,21 +431,7 @@ const CreateDebitNote = () => {
             {/* Total card */}
             <div className="border border-gray-200 rounded-2xl bg-white shadow-sm overflow-hidden mb-5">
 
-              {/* Additional Charges */}
-              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-                <button
-                  onClick={() => {}}
-                  className="flex items-center gap-1.5 text-sm text-blue-600 font-medium hover:text-blue-800 transition"
-                >
-                  <FiPlus size={14} /> Add Additional Charges
-                </button>
-                <input
-                  type="number"
-                  value={additionalCharges}
-                  onChange={(e) => setAdditionalCharges(e.target.value)}
-                  className="w-20 border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-blue-200 tabular-nums"
-                />
-              </div>
+           
 
               {/* Taxable Amount */}
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
@@ -441,30 +445,6 @@ const CreateDebitNote = () => {
                 <span className="text-sm font-semibold text-gray-800 tabular-nums">{fmt(gstAmount)}</span>
               </div>
 
-              {/* Discount */}
-              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-                <span className="text-sm text-gray-600">Discount</span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={0} max={100}
-                    value={discount}
-                    onChange={(e) => setDiscount(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-                    className="w-16 border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-200 tabular-nums"
-                  />
-                  <span className="text-sm text-red-500 tabular-nums font-medium">- {fmt(discountAmt)}</span>
-                </div>
-              </div>
-
-              {/* Auto Round Off */}
-              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={autoRoundOff} onChange={(e) => setAutoRoundOff(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-200 cursor-pointer" />
-                  <span className="text-sm text-gray-600">Auto Round Off</span>
-                </label>
-                <span className="text-sm text-gray-500 tabular-nums">{fmt(roundOffVal)}</span>
-              </div>
 
               {/* Total Amount */}
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-200 bg-gray-50">
@@ -480,49 +460,7 @@ const CreateDebitNote = () => {
                 </p>
               </div>
 
-              {/* Mark as fully paid */}
-              <div className="flex items-center justify-end gap-2 px-5 py-3 border-b border-gray-100">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <span className="text-sm text-gray-600">Mark as fully paid</span>
-                  <input type="checkbox" checked={markFullyPaid}
-                    onChange={(e) => {
-                      setMarkFullyPaid(e.target.checked);
-                      if (e.target.checked) setAmountPaid(totalAmount);
-                      else setAmountPaid(0);
-                    }}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-200 cursor-pointer" />
-                </label>
-              </div>
-
-              {/* Amount Paid */}
-              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-                <span className="text-sm text-gray-600">Amount Paid</span>
-                <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
-                  <span className="px-3 py-1.5 bg-gray-50 text-sm text-gray-500 border-r border-gray-200">₹</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={amountPaid}
-                    onChange={(e) => { setAmountPaid(e.target.value); setMarkFullyPaid(false); }}
-                    className="w-24 px-2.5 py-1.5 text-sm focus:outline-none tabular-nums text-right"
-                  />
-                  <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)}
-                    className="px-2 py-1.5 text-sm bg-white border-l border-gray-200 focus:outline-none text-gray-600 cursor-pointer">
-                    <option>Cash</option>
-                    <option>UPI</option>
-                    <option>Bank Transfer</option>
-                    <option>Cheque</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Balance Amount */}
-              <div className="flex items-center justify-between px-5 py-3.5">
-                <span className="text-sm font-bold text-blue-700">Balance Amount</span>
-                <span className={`text-base font-bold tabular-nums ${balanceAmount > 0 ? "text-blue-700" : "text-green-600"}`}>
-                  {fmt(Math.max(0, balanceAmount))}
-                </span>
-              </div>
+            
             </div>
 
             {/* Action Buttons */}

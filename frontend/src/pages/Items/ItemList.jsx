@@ -5,6 +5,7 @@ import { LuTag, LuLayoutGrid, LuDatabase } from "react-icons/lu";
 import Table from "../../components/Table";
 import { useNavigate } from "react-router-dom";
 import Button from "../../components/Button";
+import JsBarcode from "jsbarcode";
 
 const fmt = (n) =>
   n === 0
@@ -332,6 +333,52 @@ await axios.put(`http://localhost:8000/api/product/${editItem.id}`, {
     }
   };
 
+const handlePrintBarcode = (item) => {
+  console.log("PRINT ITEM:", item);
+
+  const code = item.barcode?.trim();
+
+  if (!code) {
+    alert("Barcode missing ❌");
+    return;
+  }
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+
+  JsBarcode(svg, code, {
+    format: "CODE128",
+    width: 2,
+    height: 50,
+    displayValue: false,
+  });
+
+  const barcodeSVG = svg.outerHTML;
+
+  const win = window.open("", "_blank");
+
+win.document.write(`
+  <html>
+    <head>
+      <title>Print</title>
+    </head>
+    <body style="text-align:center; padding:20px;">
+      <div>${item.product}</div>
+
+      ${barcodeSVG}
+
+      <div>${code}</div>
+
+      <script>
+        window.onload = function() {
+          window.print();   // 🔥 THIS OPENS PRINTER
+        };
+      </script>
+    </body>
+  </html>
+`);
+  win.document.close();
+};
+
   const fetchItems = async () => {
     try {
       setLoading(true);
@@ -342,6 +389,7 @@ await axios.put(`http://localhost:8000/api/product/${editItem.id}`, {
         (res.data.data || []).map((item) => ({
           id:            item._id || item.id,
           product:       item.product || item.name || "",
+          barcode: item.barcode || "",
           code:          item.code || "",
           category:      item.category || "",
           hsn:           item.hsn || "",
@@ -387,16 +435,26 @@ total: Number(item.total ?? item.total_stock ?? 0),
             <FiPlus size={14} /> Add Item
           </Button>
         }
-        renderActions={(row) => (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => openEdit(row, e)}
-            className="flex items-center gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50"
-          >
-            <FiEdit2 size={12} /> Edit
-          </Button>
-        )}
+renderActions={(row) => (
+  <div className="flex gap-1">
+    
+    <button
+      onClick={(e) => openEdit(row, e)}
+      className="flex items-center gap-1 px-2 py-1 text-xs border border-blue-200 text-blue-600 rounded hover:bg-blue-50"
+    >
+      <FiEdit2 size={11} />
+      Edit
+    </button>
+
+    <button
+      onClick={() => handlePrintBarcode(row)}
+      className="flex items-center gap-1 px-2 py-1 text-xs border border-green-200 text-green-600 rounded hover:bg-green-50"
+    >
+      🖨 Print
+    </button>
+
+  </div>
+)}
       />
 
       {editItem !== null && (

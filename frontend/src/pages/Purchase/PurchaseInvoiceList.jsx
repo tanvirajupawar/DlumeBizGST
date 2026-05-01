@@ -12,9 +12,14 @@ import PurchaseReturnModal from "../../components/Purchasereturnmodal";
 import DebitNoteModal from "../../components/DebitNoteModal";
 import InvoiceDetailPanel from "../../components/InvoiceDetailPanel";
 import ActionMenu from "../../components/ActionMenu";
+import StatusBadge from "../../components/StatusBadge";
 
-const fmt = (n) => "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2 });
-const TABS = ["Invoices", "Payables"];
+
+const fmt = (n) => {
+  const num = Number(n || 0);
+  return "₹" + num.toLocaleString("en-IN", { minimumFractionDigits: 2 });
+};
+const TABS = ["Invoices", "Payments"];
 
 /* ─── Confirm Dialog ─── */
 const ConfirmDialog = ({ invoice, onConfirm, onCancel }) => (
@@ -49,8 +54,12 @@ const PaymentModal = ({ invoice, onClose, onConfirm }) => {
 
   const handleSubmit = () => {
     if (!form.amount || !form.date) return;
-    onConfirm({ invoiceId: invoice.id, invoiceNo: invoice.invoiceNo, ...form });
-  };
+onConfirm({
+  invoiceId: invoice.id,
+  vendor_id: invoice.vendor_id, // 🔥 ADD THIS
+  invoiceNo: invoice.invoiceNo,
+  ...form
+});  };
 
   return (
     <div
@@ -153,11 +162,11 @@ const PaymentModal = ({ invoice, onClose, onConfirm }) => {
 /* ─── Main Page ─── */
 const PurchaseInvoiceList = () => {
   const navigate = useNavigate();
+  const [payments, setPayments] = useState([]);
   const [activeTab, setActiveTab]               = useState("Invoices");
   const [invoices, setInvoices]                 = useState([]);
   const [confirmTarget, setConfirmTarget]       = useState(null);
   const [search, setSearch]                     = useState("");
-  const [payables, setPayables]                 = useState([]);
   const [showPayableModal, setShowPayableModal] = useState(false);
   const [purchaseReturnTarget, setPurchaseReturnTarget] = useState(null);
   const [selectedInvoice, setSelectedInvoice]   = useState(null);
@@ -184,36 +193,50 @@ const PurchaseInvoiceList = () => {
   };
 
   // ↓ NEW
-  const handlePayment = async (data) => {
-    try {
-      await axios.post(`/api/purchase/${data.invoiceId}/payment`, data);
-      // Optionally mark invoice as confirmed/paid in UI:
-      setInvoices(prev =>
-        prev.map(inv => inv.id === data.invoiceId ? { ...inv, confirmed: true } : inv)
-      );
-    } catch (err) {
-      console.error(err);
-      alert("Failed to record payment");
-    } finally {
-      setPaymentTarget(null);
-    }
-  };
+const handlePayment = async (data) => {
+  try {
+await axios.post("http://localhost:8000/api/payment-out", {
+  vendor_id: data.vendor_id,
+  amount: Number(data.amount),
+  payment_mode: data.paymentMode,
+  remark: data.note || "",
+
+  // 🔥 VERY IMPORTANT
+  invoice_ids: [data.invoiceId],
+});
+    // refresh both
+    fetchInvoices();
+    fetchPayments();
+
+    window.dispatchEvent(new Event("paymentUpdated"));
+
+  } catch (err) {
+    console.error(err);
+    alert("Failed to record payment");
+  } finally {
+    setPaymentTarget(null);
+  }
+};
 
   const filteredInvoices = invoices.filter(inv =>
     (inv.vendor || "").toLowerCase().includes(search.toLowerCase()) ||
     (inv.invoiceNo || "").toLowerCase().includes(search.toLowerCase())
   );
-  const filteredPayables = payables.filter(pay =>
-    (pay.vendor || "").toLowerCase().includes(search.toLowerCase()) ||
-    (pay.refNo || "").toLowerCase().includes(search.toLowerCase())
-  );
 
-  const totalPurchases = invoices.reduce((s, i) => s + i.amount, 0);
-  const totalPayables  = payables.reduce((s, p) => s + p.amount, 0);
+ const totalPurchases = invoices.reduce((s, i) => s + i.amount, 0);
 
-  useEffect(() => {
-    fetchInvoices();
-  }, []);
+ const filteredPayables = payments.filter(p =>
+  (p.vendor || "").toLowerCase().includes(search.toLowerCase()) ||
+  (p.refNo || "").toLowerCase().includes(search.toLowerCase())
+);
+
+const totalPayables = filteredPayables.reduce((s, p) => s + p.amount, 0);
+
+
+useEffect(() => {
+  fetchInvoices();
+  fetchPayments();
+}, []);
 
   const fetchInvoices = async () => {
     try {
@@ -223,11 +246,12 @@ const PurchaseInvoiceList = () => {
           id: p._id,
           invoiceNo: p.supplier_invoice_no,
 vendor_id: p.vendor_id?._id,
-vendor: p.vendor_id?.company_name || "Vendor",
-          companyName: p.vendor_id?.company_name || "No Company",
+vendor: p.vendor_id?.vendor_name || "Vendor",
+companyName: p.vendor_id?.company_name || "-",
           date: new Date(p.invoice_date).toLocaleDateString("en-GB"),
           amount: p.total_amount,
-          confirmed: p.status === "Paid",
+         status: p.payment_status || "Unpaid",
+         paid_amount: p.paid_amount || 0,
           items: (p.details || []).map((it) => ({
             item: it.product_name,
             bags: "-",
@@ -240,6 +264,29 @@ vendor: p.vendor_id?.company_name || "Vendor",
       }
     } catch (err) { console.error(err); }
   };
+
+
+  const fetchPayments = async () => {
+  try {
+    const res = await axios.get("http://localhost:8000/api/payment-out");
+
+    if (res.data.success) {
+      const formatted = res.data.data.map((p) => ({
+        id: p._id,
+        vendor: p.vendor_id?.vendor_name || "Vendor",
+        refNo: p.payment_no,
+        date: new Date(p.date).toLocaleDateString("en-GB"),
+        method: p.payment_mode,
+        amount: p.amount,
+        status: "Paid",
+      }));
+
+      setPayments(formatted);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   return (
     <div className="space-y-5">
@@ -257,7 +304,7 @@ vendor: p.vendor_id?.company_name || "Vendor",
         </div>
         <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-lg px-4 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-            {isInvoice ? "Total Purchases" : "Total Payables"}
+            {isInvoice ? "Total Purchases" : "Total Payments"}
           </p>
           <p className="text-sm font-bold text-green-600 tabular-nums">
             {fmt(isInvoice ? totalPurchases : totalPayables)}
@@ -276,11 +323,17 @@ vendor: p.vendor_id?.company_name || "Vendor",
               placeholder={isInvoice ? "Search purchase invoices..." : "Search payables..."}
               className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
           </div>
-          <Button variant="navy" size="sm" className="flex items-center gap-2"
-            onClick={() => isInvoice ? navigate("/purchase-invoice") : setShowPayableModal(true)}>
-            <FiPlus size={14} />
-            {isInvoice ? "New Invoice" : "Add Payable"}
-          </Button>
+      {isInvoice && (
+  <Button
+    variant="navy"
+    size="sm"
+    className="flex items-center gap-2"
+    onClick={() => navigate("/purchase-invoice")}
+  >
+    <FiPlus size={14} />
+    New Invoice
+  </Button>
+)}
         </div>
 
         {isInvoice ? (
@@ -326,10 +379,7 @@ vendor: p.vendor_id?.company_name || "Vendor",
                       <p className="text-sm font-semibold text-gray-800 tabular-nums">{fmt(inv.amount)}</p>
                     </div>
                     <div className="py-4 flex items-center justify-center">
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded
-                        ${inv.confirmed ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
-                        {inv.confirmed ? "Confirmed" : "Pending"}
-                      </span>
+<StatusBadge status={inv.status} />
                     </div>
 
                     {/* ↓ NEW — Pay button */}

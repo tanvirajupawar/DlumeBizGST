@@ -6,41 +6,15 @@ import { HiOutlineCalendar } from "react-icons/hi";
 import Button from "../../components/Button";
 import Table from "../../components/Table";
 import PurchaseReturnDetailPanel from "../../components/PurchaseReturnDetailPanel";
-
+import DateFilter from "../../components/DateFilter";
+import { applyDateFilter } from "../../components/DateFilter";
 
 const fmt = (n) =>
   "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: 0 });
 
 const DATE_FILTERS = ["Last 30 Days", "Last 90 Days", "Last 365 Days", "All Time"];
 
-/* ─── Date Filter ─── */
-const DateFilter = ({ selected, onChange }) => {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 bg-white"
-      >
-        <HiOutlineCalendar size={15} className="text-gray-400" />
-        {selected}
-      </button>
-      {open && (
-        <div className="absolute top-10 bg-white border rounded shadow w-40 z-20">
-          {DATE_FILTERS.map((f) => (
-            <button
-              key={f}
-              onClick={() => { onChange(f); setOpen(false); }}
-              className="block w-full px-3 py-2 text-sm hover:bg-gray-50"
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+
 
 /* ─── PRINT TEMPLATE ─── */
 const getPrintHTML = (note) => `
@@ -152,7 +126,7 @@ const PurchaseReturnList = () => {
 companyName: r.vendor_id?.company_name || "",
 customerName: r.vendor_id?.vendor_name || "",
   invoiceNo: r.purchase_id?.supplier_invoice_no || "-",
-  date: new Date(r.date).toLocaleDateString("en-GB"),
+  date: r.date,
   amount: r.total_amount || 0,
 
   subTotal: r.sub_total,
@@ -178,10 +152,20 @@ customerName: r.vendor_id?.vendor_name || "",
     }
   };
 
-  const totalAmount = returns.reduce((s, r) => s + r.amount, 0);
+const filteredReturns = applyDateFilter(
+  returns,
+  (r) => r.date,
+  dateFilter
+);
 
+const totalAmount = filteredReturns.reduce((s, r) => s + r.amount, 0);
 const columns = [
-  { key: "date", label: "Date" },
+  {
+  key: "date",
+  label: "Date",
+  render: (v) =>
+    new Date(v).toLocaleDateString("en-GB").replace(/\//g, "-"),
+},
   {
     key: "returnNo",
     label: "Purchase Return No",
@@ -237,19 +221,28 @@ const columns = [
   }
 };
 
+
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <DateFilter selected={dateFilter} onChange={setDateFilter} />
-        <div className="ml-auto bg-green-50 px-4 py-2 rounded">
-          <p className="text-xs text-gray-400">Total Returns</p>
-          <p className="text-sm font-bold text-green-600">{fmt(totalAmount)}</p>
-        </div>
-      </div>
+    <div className="flex items-center gap-3">
+
+  {/* Total */}
+  <div className="bg-green-50 px-4 py-2 rounded flex items-center gap-2">
+    <span className="text-xs text-gray-400">Total Returns:</span>
+    <span className="text-sm font-bold text-green-600">{fmt(totalAmount)}</span>
+  </div>
+
+  {/* Filter */}
+  <div className="ml-auto">
+    <DateFilter value={dateFilter} onChange={setDateFilter} />
+  </div>
+
+</div>
 
       <Table
         columns={columns}
-        data={returns}
+        data={filteredReturns} 
         onRowClick={(row) => setSelectedReturn(row)}
         headerActions={
           <Button onClick={() => navigate("/purchase-return/new")}>

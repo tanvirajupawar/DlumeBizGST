@@ -40,14 +40,11 @@ const result = await Promise.all(
       vendor_id: v._id
     });
 
-    const outstanding = invoices.reduce((sum, inv) => {
-      const balance =
-        inv.balance_amount !== undefined && inv.balance_amount !== null
-          ? Number(inv.balance_amount)
-          : Number(inv.total_amount || 0);
-
-      return sum + balance;
-    }, 0);
+const outstanding = invoices.reduce((sum, inv) => {
+  const total = Number(inv.total_amount || 0);
+  const paid  = Number(inv.paid_amount || 0);
+  return sum + (total - paid);
+}, 0);
 
     return {
       ...v,
@@ -133,13 +130,11 @@ fetch: async function (req, res) {
     // ── Compute pending_amount live from invoice balance_amounts ──
     const invoices = await PurchaseOrderModel.find({ vendor_id: vendor._id });
 
-    const pending = invoices.reduce((sum, inv) => {
-      const bal =
-        inv.balance_amount !== undefined && inv.balance_amount !== null
-          ? Number(inv.balance_amount)
-          : Number(inv.total_amount || 0);
-      return sum + bal;
-    }, 0);
+const pending = invoices.reduce((sum, inv) => {
+  const total = Number(inv.total_amount || 0);
+  const paid  = Number(inv.paid_amount || 0);
+const balance = Math.max(0, total - paid);
+return sum + balance;}, 0);
 
     // ── Keep existing totals for backward compat ──
     const totalAmount = invoices.reduce((s, inv) => s + Number(inv.total_amount || 0), 0);
