@@ -36,12 +36,12 @@ const inputStyle = {
 };
 
 const emptyForm = {
- customer_name: "",  company_name: "", customer_type: "", business_type: "",
+  customer_name: "", company_name: "", customer_type: "", business_type: "",
   customer_gstin: "", customer_pan: "", customer_phone: "", customer_alt_phone: "",
   customer_email: "", customer_website: "",
   customer_address_line1: "", customer_address_line2: "",
   customer_city: "", customer_state: "", customer_state_code: "", customer_pincode: "",
- 
+  opening_balance: 0, 
 };
 
 const validateGST = (v) => /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(v);
@@ -290,15 +290,27 @@ const handleSave = async () => {
       />
     </Field>
 
-    {/* Business Type */}
-    <Field label="Business Type">
-      <SelectInput
-        value={form.business_type}
-        onChange={(e) => update("business_type", e.target.value)}
-        placeholder="Select Business Type"
-        options={businessTypes.map((t) => ({ value: t, label: t }))}
-      />
-    </Field>
+  {/* Business Type */}
+<Field label="Business Type">
+  <SelectInput
+    value={form.business_type}
+    onChange={(e) => update("business_type", e.target.value)}
+    placeholder="Select Business Type"
+    options={businessTypes.map((t) => ({ value: t, label: t }))}
+  />
+</Field>
+
+{/* ✅ ADD THIS */}
+<Field label="Opening Balance">
+  <TextInput
+    type="number"
+    value={form.opening_balance === 0 ? "" : form.opening_balance}
+onChange={(e) => {
+  const val = e.target.value;
+  update("opening_balance", val === "" ? 0 : parseInt(val));
+}}    placeholder="0"
+  />
+</Field>
 
   </div>
 </Section>

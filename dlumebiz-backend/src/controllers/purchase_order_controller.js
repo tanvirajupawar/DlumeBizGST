@@ -25,111 +25,252 @@ const printer = new PdfPrinter(fonts);
 const purchaseOrderControler = {
 
 
-   create: async function (req, res) {
+create: async function (req, res) {
   try {
+
     const data = req.body;
 
-    // Map frontend items → backend format
-const details = (data.details || data.items || []).map((item) => {
+    console.log("📦 FULL REQUEST BODY:");
+    console.log(JSON.stringify(data, null, 2));
 
-console.log("🧾 ITEM FROM FRONTEND:", item);
-  const qty = parseInt(item.qty || 0);
-  const price = parseFloat(item.price || 0);
-  const discount = parseFloat(item.discount || 0);
+    // ================================
+    // VALIDATE VENDOR ID
+    // ================================
+    let vendorId = null;
 
-  const gross = qty * price;
-  const discountAmount = discount;
-  const amount = gross - discountAmount;
+    if (
+      data.vendor_id &&
+      mongoose.Types.ObjectId.isValid(data.vendor_id)
+    ) {
+      vendorId = data.vendor_id;
+    }
 
-  return {
-    product_name: item.product_name,
-    item_type: item.item_type || item.itemType,
-    sku: item.sku,
-    hsn: item.hsn,
-    unit: item.unit,
-    qty,
-    price,
-    discount,
-    gst_rate: parseFloat(item.gst_rate || item.gstRate || 0),
-    amount,
-    purchase_order_id: null,
-    product_id: item.product_id || null
-  };
+    // ================================
+    // MAP DETAILS
+    // ================================
+    const details = (data.details || data.items || []).map((item) => {
 
-});
+      console.log("🧾 ITEM FROM FRONTEND:", item);
 
-   const order = new PurchaseOrderModel({
-  company_id: data.company_id,
-  vendor_id: data.vendor_id,
-  supplier_invoice_no: data.supplier_invoice_no,
-  invoice_date: data.invoice_date,
-entry_date: data.entry_date,
-purchase_type: data.purchase_type,
-total_amount: data.total_amount,
-paid_amount: data.amount_paid || 0,
-payment_mode: data.payment_mode || "Cash",
-payment_remark: data.payment_ref || "",
-});
+      const qty = parseInt(item.qty || 0);
+      const price = parseFloat(item.price || 0);
+      const discount = parseFloat(item.discount || 0);
+
+      const gross = qty * price;
+      const amount = gross - discount;
+
+      return {
+        product_name: item.product_name || item.name || "",
+
+        item_type: item.item_type || item.itemType || "Goods",
+
+        sku: item.sku || "",
+
+        hsn: item.hsn || "",
+
+        unit: item.unit || "NOS",
+
+        qty,
+
+        price,
+
+        discount,
+
+        gst_rate: parseFloat(
+          item.gst_rate || item.gstRate || 0
+        ),
+
+        amount,
+
+        purchase_order_id: null,
+
+        product_id:
+          item.product_id &&
+          mongoose.Types.ObjectId.isValid(item.product_id)
+            ? item.product_id
+            : null,
+      };
+    });
+
+    console.log("📦 FINAL DETAILS:");
+    console.log(details);
+
+    // ================================
+    // CREATE ORDER
+    // ================================
+    const order = new PurchaseOrderModel({
+
+      company_id: data.company_id,
+
+      vendor_id: vendorId,
+
+      supplier_invoice_no:
+        data.supplier_invoice_no || "",
+
+      invoice_date: data.invoice_date,
+
+      entry_date: data.entry_date,
+
+      purchase_type:
+        data.purchase_type || "Credit",
+
+      reverse_charge:
+        data.reverse_charge || "No",
+
+      notes: data.notes || "",
+
+      total_amount:
+        Number(data.total_amount) || 0,
+
+      paid_amount:
+        Number(data.amount_paid) || 0,
+
+      balance_amount:
+        Number(data.balance) || 0,
+
+      payment_mode:
+        data.payment_mode || "Cash",
+
+      payment_remark:
+        data.payment_ref || "",
+
+      status:
+        data.status || "Pending",
+    });
+
     await order.save();
 
-    // attach purchase_order_id
+    console.log("✅ ORDER SAVED");
+
+    // ================================
+    // ATTACH ORDER ID
+    // ================================
     details.forEach((d) => {
       d.purchase_order_id = order._id;
     });
 
-const detailDocs = details.length ? await PurchaseDetail.insertMany(details) : [];
-console.log("🔥 DETAIL DOCS:", detailDocs);
-    // Stock Update
-for (let d of detailDocs) {
+    // ================================
+    // INSERT DETAILS
+    // ================================
+    let detailDocs = [];
 
-  console.log("🔥 PRODUCT ID CHECK 👉", d.product_id);
-  if (!d.product_id) continue;
+    try {
 
-  const qty = parseInt(d.qty) || 0;
+      detailDocs = details.length
+        ? await PurchaseDetail.insertMany(details)
+        : [];
 
-  // product update
-  const product = await productModel.findById(d.product_id);
-  if (product) {
-    product.qty = (product.qty || 0) + qty;
-    product.stock_in = (product.stock_in || 0) + qty;
-    product.total = product.qty;
-    await product.save();
-  }
+      console.log("✅ DETAIL DOCS SAVED");
 
-  // stock update
-  let stock = await StockManagementModel.findOne({
-    product_id: d.product_id,
-    company_id: order.company_id
-  });
+    } catch (insertError) {
 
-  if (stock) {
-  stock.in = (stock.in || 0) + qty;            
-  stock.total_stock = (stock.total_stock || 0) + qty;
-  await stock.save();
-} else {
-  await StockManagementModel.create({
-    product_id: d.product_id,
-    company_id: order.company_id,
-    in: qty,                                   
-    out: 0,                                  
-    total_stock: qty
-  });
-}
-}
+      console.log("❌ INSERT MANY ERROR");
+      console.log(insertError);
 
-// ✅ RESPONSE OUTSIDE LOOP
-return res.json({
-  success: true,
-  data: order,
-  message: "Purchase Order Created Successfully",
-});
+      throw insertError;
+    }
+
+    // ================================
+    // STOCK UPDATE
+    // ================================
+    for (let d of detailDocs) {
+
+      console.log("🔥 PRODUCT ID:", d.product_id);
+
+      if (!d.product_id) continue;
+
+      const qty = parseInt(d.qty) || 0;
+
+      // ============================
+      // UPDATE PRODUCT
+      // ============================
+      const product = await productModel.findById(d.product_id);
+
+      if (product) {
+
+        product.qty =
+          (product.qty || 0) + qty;
+
+        product.stock_in =
+          (product.stock_in || 0) + qty;
+
+        product.total = product.qty;
+
+        product.purchased_price = d.price;
+
+        await product.save();
+      }
+
+      // ============================
+      // UPDATE STOCK
+      // ============================
+      let stock =
+        await StockManagementModel.findOne({
+          product_id: d.product_id,
+          company_id: order.company_id,
+        });
+
+      if (stock) {
+
+        stock.in =
+          (stock.in || 0) + qty;
+
+        stock.total_stock =
+          (stock.total_stock || 0) + qty;
+
+        await stock.save();
+
+      } else {
+
+        await StockManagementModel.create({
+          product_id: d.product_id,
+          company_id: order.company_id,
+
+          in: qty,
+
+          out: 0,
+
+          total_stock: qty,
+        });
+      }
+    }
+
+    // ================================
+    // SUCCESS RESPONSE
+    // ================================
+    return res.json({
+      success: true,
+      data: order,
+      message: "Purchase Order Created Successfully",
+    });
 
   } catch (error) {
+
+    console.log("❌ PURCHASE CREATE ERROR ❌");
+
+    console.log("MESSAGE:");
+    console.log(error.message);
+
+    console.log("FULL ERROR:");
     console.log(error);
+
+    if (error.errors) {
+
+      console.log("VALIDATION ERRORS:");
+
+      Object.keys(error.errors).forEach((key) => {
+
+        console.log(
+          key,
+          error.errors[key].message
+        );
+      });
+    }
+
     return res.status(500).json({
       success: false,
-      message: "Server Error",
-      error: error.message,
+      message: error.message || "Server Error",
+      error: error,
     });
   }
 },
@@ -146,7 +287,23 @@ fetch: async function (req, res) {
 
     // ✅ Fetch orders
 const orders = await PurchaseOrderModel.find(filter)
-  .populate("vendor_id", "vendor_name company_name gst gstin state_code")
+ .populate(
+  "vendor_id",
+  `
+  vendor_name
+  company_name
+  gst
+  gstin
+  state_code
+  address_line_1
+  address_line_2
+  city
+  state
+  pincode
+  contact_no_1
+  email
+  `
+)
   .sort({ createdOn: -1 })
   .lean();
     // ✅ Fetch ONLY related details (IMPORTANT FIX)
@@ -187,20 +344,49 @@ const orders = await PurchaseOrderModel.find(filter)
 
 fetchOrder: async function (req, res) {
   try {
+
     const id = req.params.id;
 
-    const order = await PurchaseOrderModel.findById(id).populate("vendor_id");
-    const details = await PurchaseDetail.find({ purchase_order_id: id });
+    const order = await PurchaseOrderModel.findById(id)
+
+      .populate(
+        "vendor_id",
+        `
+        vendor_name
+        first_name
+        last_name
+        company_name
+        gst
+        gstin
+        pan
+        state_code
+        address_line_1
+        address_line_2
+        city
+        state
+        country
+        pincode
+        contact_no_1
+        email
+        `
+      )
+
+      .lean();
+
+    const details = await PurchaseDetail.find({
+      purchase_order_id: id
+    }).lean();
 
     return res.json({
       success: true,
       data: {
-        ...order.toObject(),
-        details: details
+        ...order,
+        details
       }
     });
 
   } catch (error) {
+
     return res.status(500).json({
       success: false,
       message: "Server Error",
@@ -265,6 +451,21 @@ fetchOrder: async function (req, res) {
 stock.total_stock = Math.max(0, (stock.total_stock || 0) - qty);
         await stock.save();
       }
+
+      const product = await productModel.findById(d.product_id);
+
+if (product) {
+  product.qty = Math.max(0, (product.qty || 0) - qty);
+
+  product.stock_in = Math.max(
+    0,
+    (product.stock_in || 0) - qty
+  );
+
+  product.total = product.qty;
+
+  await product.save();
+}
     }
 
     // delete details
@@ -357,6 +558,25 @@ stock.in = Math.max(0, (stock.in || 0) - qty);
 stock.total_stock = Math.max(0, (stock.total_stock || 0) - qty);
     await stock.save();
   }
+const product = await productModel.findById(d.product_id);
+
+if (product) {
+
+  product.qty = Math.max(
+    0,
+    (product.qty || 0) - qty
+  );
+
+  product.stock_in = Math.max(
+    0,
+    (product.stock_in || 0) - qty
+  );
+
+  product.total = product.qty;
+
+  await product.save();
+}
+
 }
             await PurchaseDetail.deleteMany({ purchase_order_id: id });
             if (Array.isArray(details) && details.length > 0) {

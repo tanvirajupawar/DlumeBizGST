@@ -732,70 +732,224 @@ const roundOff = grandTotal - beforeRound;
     if (extraDiscount > 0 && items.length > 0) applyOverallDiscount(extraDiscount);
   }, [items.length]);
 
-  const handleSaveSales = async () => {
-    if (!customerForm.name.trim())  { alert("Customer Name is required");       return; }
-// ✅ Skip state validation for walk-in
-if (!selectedCustomer?.isWalkIn) {
-  if (!customerForm.state) {
-    alert("Customer State is required");
-    return;
-  }
-  if (!customerForm.state_code) {
-    alert("Customer State Code is required");
-    return;
-  }
-}
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (!it.name)                     { alert(`Item Name required in row ${i+1}`);   return; }
-      if (!it.unit)                     { alert(`Unit required in row ${i+1}`);         return; }
-      if (!it.qty || it.qty <= 0)       { alert(`Qty must be > 0 in row ${i+1}`);      return; }
-      if (!it.salePrice || it.salePrice <= 0) { alert(`Price must be > 0 in row ${i+1}`); return; }
-    }
-    const payload = {
-      company_id:     localStorage.getItem("company_id"),
-      invoice_no:     invoiceNo,
-      invoice_date:   invoiceDate,
-      due_date:       dueDate,
-      sales_type:     salesType,
-      reverse_charge: reverseCharge,
-      notes,
-    client_id: selectedCustomer?._id || null,
-customer_name: selectedCustomer?.isWalkIn
-  ? (customerForm.name?.trim() || "Walk-in")
-  : customerForm.name,
-  contact_no: selectedCustomer?.isWalkIn
-  ? (customerForm.phone || "")
-  : customerForm.phone,
 
-// ✅ ADD THIS
-state: selectedCustomer?.isWalkIn ? "" : customerForm.state,
-state_code: selectedCustomer?.isWalkIn ? "" : customerForm.state_code,
-      details: items.map(it => ({
-        product_name: it.name, product_id: it.product_id || null, item_type: it.itemType,
-        sku: it.sku, hsn: it.hsn, unit: it.unit, qty: it.qty,
-        price: it.salePrice, discount: it.discount || 0, gst_rate: it.gstRate || 18, amount: itemTotal(it),
-      })),
-      sub_total:       subtotal,
-      total_discount:  totalDiscount,
-      taxable_amount:  taxableAmount,
-      total_tax:       totalTax,
-      other_charges:   Number(otherCharges) || 0,
-      round_off:       roundOff,
-      total_amount:    grandTotal,
-      amount_received: Number(amountReceived),
-      payment_mode:    paymentMode,
-      payment_ref:     paymentRef,
-      status: Number(amountReceived) >= grandTotal ? "Paid" : "Pending",
-    };
+useEffect(() => {
+  const generateInvoice = async () => {
     try {
-      const res = isEdit
-        ? await axios.put(`http://localhost:8000/api/sales/${id}`, payload)
-        : await axios.post("http://localhost:8000/api/sales", payload);
-      if (res.data.success) { alert("Sales Invoice Saved Successfully"); navigate("/sales-invoice-list"); }
-      else alert(res.data.message || "Error saving");
-    } catch (err) { console.error(err); alert("Server Error"); }
+      const res = await axios.get("http://localhost:8000/api/sales/generate-invoice");
+      console.log("Invoice response:", res.data); // ← add this
+      if (res.data.success) {
+        setInvoiceNo(res.data.invoice_no);
+      }
+    } catch (err) {
+      console.log("Invoice gen error:", err);
+    }
   };
+
+  if (!isEdit) {
+    generateInvoice();
+  }
+}, [isEdit]);
+
+const handleSaveSales = async () => {
+
+  // ✅ CUSTOMER VALIDATION
+  if (!customerForm.name.trim()) {
+    alert("Customer Name is required");
+    return;
+  }
+
+  // ✅ Skip state validation for walk-in
+  if (!selectedCustomer?.isWalkIn) {
+
+    if (!customerForm.state) {
+      alert("Customer State is required");
+      return;
+    }
+
+    if (!customerForm.state_code) {
+      alert("Customer State Code is required");
+      return;
+    }
+  }
+
+  // ✅ ITEM VALIDATION
+  for (let i = 0; i < items.length; i++) {
+
+    const it = items[i];
+
+    if (!it.name) {
+      alert(`Item Name required in row ${i + 1}`);
+      return;
+    }
+
+    if (!it.unit) {
+      alert(`Unit required in row ${i + 1}`);
+      return;
+    }
+
+    if (!it.qty || it.qty <= 0) {
+      alert(`Qty must be > 0 in row ${i + 1}`);
+      return;
+    }
+
+    if (!it.salePrice || it.salePrice <= 0) {
+      alert(`Price must be > 0 in row ${i + 1}`);
+      return;
+    }
+  }
+
+  // ✅ GST CATEGORY DETECTION
+
+const customerGSTIN = (customerForm.gstin || "").trim();
+
+const isB2B =
+  customerGSTIN.length === 15;
+
+const SELLER_STATE = "27"; // Maharashtra
+
+const isInterState =
+  customerForm.state_code &&
+  customerForm.state_code !== SELLER_STATE;
+
+const isLargeInvoice =
+  grandTotal > 250000;
+
+let invoice_category = "B2CS";
+
+if (isB2B) {
+  invoice_category = "B2B";
+}
+else if (!isB2B && isInterState && isLargeInvoice) {
+  invoice_category = "B2CL";
+}
+else {
+  invoice_category = "B2CS";
+}
+
+  // ✅ PAYLOAD
+  const payload = {
+
+    company_id: localStorage.getItem("company_id"),
+
+    invoice_no: invoiceNo,
+    invoice_date: invoiceDate,
+    due_date: dueDate,
+
+    sales_type: salesType,
+    reverse_charge: reverseCharge,
+
+    notes,
+
+    // ✅ CATEGORY
+    invoice_category,
+
+    // ✅ CUSTOMER
+    client_id: selectedCustomer?._id || null,
+
+    customer_name: selectedCustomer?.isWalkIn
+      ? (customerForm.name?.trim() || "Walk-in")
+      : customerForm.name,
+
+    contact_no: selectedCustomer?.isWalkIn
+      ? (customerForm.phone || "")
+      : customerForm.phone,
+
+    gstin: selectedCustomer?.isWalkIn
+      ? ""
+      : customerForm.gstin,
+
+    place_of_supply: selectedCustomer?.isWalkIn
+      ? ""
+      : customerForm.state_code,
+
+    state: selectedCustomer?.isWalkIn
+      ? ""
+      : customerForm.state,
+
+    state_code: selectedCustomer?.isWalkIn
+      ? ""
+      : customerForm.state_code,
+
+    // ✅ ITEMS
+    details: items.map(it => ({
+      product_name: it.name,
+      product_id: it.product_id || null,
+      item_type: it.itemType,
+
+      sku: it.sku,
+      hsn: it.hsn,
+      unit: it.unit,
+
+      qty: it.qty,
+
+      price: it.salePrice,
+
+      discount: it.discount || 0,
+
+      gst_rate: it.gstRate || 18,
+
+      amount: itemTotal(it),
+    })),
+
+    // ✅ TOTALS
+    sub_total: subtotal,
+
+    total_discount: totalDiscount,
+
+    taxable_amount: taxableAmount,
+
+    total_tax: totalTax,
+
+    other_charges: Number(otherCharges) || 0,
+
+    round_off: roundOff,
+
+    total_amount: grandTotal,
+
+    // ✅ PAYMENT
+    amount_received: Number(amountReceived),
+
+    payment_mode: paymentMode,
+
+    payment_ref: paymentRef,
+
+    status:
+      Number(amountReceived) >= grandTotal
+        ? "Paid"
+        : "Pending",
+  };
+
+  try {
+
+    const res = isEdit
+      ? await axios.put(
+          `http://localhost:8000/api/sales/${id}`,
+          payload
+        )
+      : await axios.post(
+          "http://localhost:8000/api/sales",
+          payload
+        );
+
+    if (res.data.success) {
+
+      alert("Sales Invoice Saved Successfully");
+
+      navigate("/sales-invoice-list");
+
+    } else {
+
+      alert(res.data.message || "Error saving");
+    }
+
+  } catch (err) {
+
+    console.error(err);
+
+    alert("Server Error");
+  }
+};
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -905,10 +1059,23 @@ state_code: selectedCustomer?.isWalkIn ? "" : customerForm.state_code,
         {/* INVOICE DETAILS */}
         <div style={{ padding: "20px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ fontSize: "12px", color: "#6b7280" }}>Invoice No</label>
-              <input value={invoiceNo || ""} onChange={e => setInvoiceNo(e.target.value)} placeholder="e.g. INV/2526/001" style={inputStyle} />
-            </div>
+<div>
+  <label style={{ fontSize: "12px", color: "#6b7280" }}>Invoice No</label>
+  <input
+    type="text"
+    value={invoiceNo || "Generating..."}
+    readOnly
+    disabled
+    style={{
+      ...inputStyle,
+      background: "#f9fafb",
+      color: invoiceNo ? "#111827" : "#9ca3af",
+      fontStyle: invoiceNo ? "normal" : "italic",
+      fontWeight: 600,
+      cursor: "not-allowed",
+    }}
+  />
+</div>
             <div>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Invoice Date *</label>
               <input type="date" value={invoiceDate || ""} onChange={e => setInvoiceDate(e.target.value)} style={inputStyle} />
@@ -1017,67 +1184,100 @@ state_code: selectedCustomer?.isWalkIn ? "" : customerForm.state_code,
           </div>
         </div>
 
-        {/* HSN Tax Summary */}
-        {Object.keys(taxSummary).length > 0 && (
-          <div style={{ marginTop: "20px" }}>
-            <div style={{ fontSize: "12px", fontWeight: 700, color: "#374151", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "8px" }}>Tax Summary (HSN Wise)</div>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px", border: "1px solid #e5e7eb" }}>
-              <thead>
-                <tr style={{ background: "#f8fafc" }}>
-                  {(isIntraState
-                    ? ["Sr.", "HSN/SAC", "Taxable Value", "SGST %", "SGST Amt", "CGST %", "CGST Amt", "Total Tax"]
-                    : ["Sr.", "HSN/SAC", "Taxable Value", "IGST %", "IGST Amt", "Total Tax"]
-                  ).map(h => (
-                    <th key={h} style={{ padding: "8px 10px", textAlign: ["Taxable Value","SGST Amt","CGST Amt","IGST Amt","Total Tax"].includes(h) ? "right" : h.includes("%") ? "center" : "left", fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb", whiteSpace: "nowrap" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {Object.values(taxSummary).map((row, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                    <td style={{ padding: "8px 10px" }}>{i + 1}</td>
-                    <td style={{ padding: "8px 10px", fontWeight: 600, fontFamily: "monospace" }}>{row.hsn}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right" }}>₹ {row.taxable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                    {isIntraState ? (
-                      <>
-                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{(row.rate / 2).toFixed(0)}%</td>
-                        <td style={{ padding: "8px 10px", textAlign: "right" }}>₹ {row.sgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{(row.rate / 2).toFixed(0)}%</td>
-                        <td style={{ padding: "8px 10px", textAlign: "right" }}>₹ {row.cgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {row.taxAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      </>
-                    ) : (
-                      <>
-                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{row.rate}%</td>
-                        <td style={{ padding: "8px 10px", textAlign: "right" }}>₹ {row.taxAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {row.taxAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      </>
-                    )}
-                  </tr>
-                ))}
-                <tr style={{ background: "#f0f4f8" }}>
-                  <td colSpan={2} style={{ padding: "8px 10px", fontWeight: 700 }}>TOTAL</td>
-                  <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {taxableAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                  {isIntraState ? (
-                    <>
-                      <td />
-                      <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {Object.values(taxSummary).reduce((s, r) => s + r.sgst, 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      <td />
-                      <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {Object.values(taxSummary).reduce((s, r) => s + r.cgst, 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {totalTax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                    </>
-                  ) : (
-                    <>
-                      <td />
-                      <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {totalTax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {totalTax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                    </>
-                  )}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
+  
+{/* HSN Tax Summary */}
+{Object.keys(taxSummary).length > 0 && (
+  <div style={{ marginTop: "20px" }}>
+    <div style={{ fontSize: "12px", fontWeight: 700, color: "#374151", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "8px" }}>
+      Tax Summary (HSN Wise)
+    </div>
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px", border: "1px solid #e5e7eb", tableLayout: "fixed" }}>
+      <thead>
+        <tr style={{ background: "#f8fafc" }}>
+          {isIntraState ? (
+            <>
+              <th style={{ width: "40px",  padding: "8px 10px", textAlign: "left",   fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>Sr.</th>
+              <th style={{ width: "100px", padding: "8px 10px", textAlign: "left",   fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>HSN/SAC</th>
+              <th style={{ width: "140px", padding: "8px 10px", textAlign: "right",  fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>Taxable Value</th>
+              <th style={{ width: "55px",  padding: "8px 10px", textAlign: "center", fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>SGST %</th>
+              <th style={{ width: "100px", padding: "8px 10px", textAlign: "right",  fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>SGST Amt</th>
+              <th style={{ width: "55px",  padding: "8px 10px", textAlign: "center", fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>CGST %</th>
+              <th style={{ width: "100px", padding: "8px 10px", textAlign: "right",  fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>CGST Amt</th>
+              <th style={{ width: "100px", padding: "8px 10px", textAlign: "right",  fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>Total Tax</th>
+            </>
+          ) : (
+            <>
+              <th style={{ width: "40px",  padding: "8px 10px", textAlign: "left",   fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>Sr.</th>
+              <th style={{ width: "120px", padding: "8px 10px", textAlign: "left",   fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>HSN/SAC</th>
+              <th style={{ width: "160px", padding: "8px 10px", textAlign: "right",  fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>Taxable Value</th>
+              <th style={{ width: "80px",  padding: "8px 10px", textAlign: "center", fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>IGST %</th>
+              <th style={{ width: "130px", padding: "8px 10px", textAlign: "right",  fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>IGST Amt</th>
+              <th style={{ width: "130px", padding: "8px 10px", textAlign: "right",  fontSize: "10px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", borderBottom: "1px solid #e5e7eb" }}>Total Tax</th>
+            </>
+          )}
+        </tr>
+      </thead>
+
+      <tbody>
+        {Object.values(taxSummary).map((row, i) => (
+          <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
+            <td style={{ padding: "8px 10px" }}>{i + 1}</td>
+            <td style={{ padding: "8px 10px", fontWeight: 600, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.hsn}</td>
+            <td style={{ padding: "8px 10px", textAlign: "right" }}>₹ {row.taxable.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+            {isIntraState ? (
+              <>
+                <td style={{ padding: "8px 10px", textAlign: "center" }}>{(row.rate / 2).toFixed(0)}%</td>
+                <td style={{ padding: "8px 10px", textAlign: "right" }}>₹ {row.sgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                <td style={{ padding: "8px 10px", textAlign: "center" }}>{(row.rate / 2).toFixed(0)}%</td>
+                <td style={{ padding: "8px 10px", textAlign: "right" }}>₹ {row.cgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {row.taxAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+              </>
+            ) : (
+              <>
+                <td style={{ padding: "8px 10px", textAlign: "center" }}>{row.rate}%</td>
+                <td style={{ padding: "8px 10px", textAlign: "right" }}>₹ {row.taxAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700 }}>₹ {row.taxAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+              </>
+            )}
+          </tr>
+        ))}
+
+        {/* TOTAL ROW */}
+        <tr style={{ background: "#f0f4f8", fontWeight: 700 }}>
+          <td colSpan={2} style={{ padding: "8px 10px" }}>TOTAL</td>
+          <td style={{ padding: "8px 10px", textAlign: "right" }}>
+            ₹ {taxableAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+          </td>
+          {isIntraState ? (
+            <>
+              <td style={{ padding: "8px 10px" }} />
+              <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                ₹ {Object.values(taxSummary).reduce((s, r) => s + r.sgst, 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </td>
+              <td style={{ padding: "8px 10px" }} />
+              <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                ₹ {Object.values(taxSummary).reduce((s, r) => s + r.cgst, 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </td>
+              <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                ₹ {totalTax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </td>
+            </>
+          ) : (
+            <>
+              <td style={{ padding: "8px 10px" }} />
+              <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                ₹ {totalTax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </td>
+              <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                ₹ {totalTax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </td>
+            </>
+          )}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+)}
       </Section>
 
       {/* Footer */}

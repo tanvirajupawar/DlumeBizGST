@@ -9,7 +9,7 @@ import Table from "../../components/Table";
 import Button from "../../components/Button";
 import Modal from "../../components/Modal";
 import PaymentSuccessScreen from "../Payment/PaymentSuccessScreen";
-
+import { downloadExcel, downloadPDF } from "../../utils/exportUtils";
 
 
 const columns = [
@@ -22,13 +22,56 @@ const columns = [
 ];
 
 const CustomerList = () => {
+
+
   const navigate = useNavigate();
 
   const [customers, setCustomers] = useState([]);
 
+// ✅ 1. FETCH DATA
 useEffect(() => {
   fetchCustomers();
 }, []);
+
+
+const exportData = customers.map((c, index) => ({
+  sr: index + 1,
+  name: `${c.first_name || ""} ${c.last_name || ""}`,
+  company: c.company_name || "-",
+  address: [
+    c.address_line_1,
+    c.address_line_2,
+    c.city,
+    c.state,
+  ].filter(Boolean).join(", ") || "-",
+  phone: c.contact_no_1 || c.contact_no_2 || "-",
+  outstanding: c.computed_outstanding || 0,
+}));
+
+const exportColumns = [
+  { key: "sr", label: "Sr No" },
+  { key: "name", label: "Customer Name" },
+  { key: "company", label: "Company" },
+  { key: "address", label: "Address" },
+  { key: "phone", label: "Phone" },
+  { key: "outstanding", label: "Outstanding" },
+];
+
+useEffect(() => {
+  window.downloadCustomers = () =>
+    downloadExcel(exportData, "Customers");
+
+  window.downloadCustomersPDF = () =>
+    downloadPDF(exportData, exportColumns, "Customers");
+
+  window.addCustomer = () => navigate("/customers");
+
+  return () => {
+    delete window.downloadCustomers;
+    delete window.downloadCustomersPDF;
+    delete window.addCustomer;
+  };
+}, [exportData, exportColumns]);
 
 const fetchCustomers = async () => {
   try {
@@ -206,11 +249,11 @@ setRemark("");
     <div className="space-y-6">
 
       {/* Header */}
-      <div className="flex items-center justify-end">
-  
+<div className="flex items-center justify-end gap-3">
 
-     
-      </div>
+
+
+</div>
 
       {/* Customer Table */}
     <Table
@@ -235,17 +278,7 @@ data={customers.map((c, index) => {
 })}
   searchPlaceholder="Search customers..."
 
-  headerActions={
-    <Button
-      variant="navy"
-      size="sm"
-      className="flex items-center gap-2"
-      onClick={() => navigate("/customers")}
-    >
-      <FiPlus size={14} />
-      Add Customer
-    </Button>
-  }
+headerActions={null}
 
   onRowClick={(row) => navigate(`/customers/${row.id}`)}
 

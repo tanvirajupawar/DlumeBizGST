@@ -679,7 +679,11 @@ const removeItem = (i) => items.length > 1 && setItems(items.filter((_, idx) => 
       supplier_invoice_no: supplierInvNo, invoice_date: invoiceDate,
       entry_date: entryDate, purchase_type: purchaseType,
       reverse_charge: reverseCharge, notes,
-      vendor_id: selectedVendor?._id || null,
+    vendor_id:
+  selectedVendor?._id &&
+  selectedVendor._id !== "__walkin__"
+    ? selectedVendor._id
+    : null,
       details: items.map(it => ({
         product_name: it.name, product_id: it.product_id ?? it._id ?? it.id, item_type: it.itemType,
         sku: it.sku, hsn: it.hsn, unit: it.unit, qty: it.qty,

@@ -9,6 +9,7 @@ import Table from "../../components/Table";
 import Button from "../../components/Button";
 import Modal from "../../components/Modal";
 import PaymentSuccessScreen from "../Payment/PaymentSuccessScreen";
+import { downloadExcel, downloadPDF } from "../../utils/exportUtils";
 
 
 const columns = [
@@ -38,6 +39,47 @@ const VendorList = () => {
   useEffect(() => {
     fetchVendors();
   }, []);
+
+
+
+  const exportData = vendors.map((v, index) => ({
+  sr: index + 1,
+  name: v.vendor_name || "-",
+  company: v.company_name || "-",
+  address: [
+    v.address_line_1,
+    v.address_line_2,
+    v.city,
+    v.state,
+  ].filter(Boolean).join(", ") || "-",
+  phone: v.contact_no_1 || "-",
+  payable: v.pending_amount || 0,
+}));
+
+const exportColumns = [
+  { key: "sr", label: "Sr No" },
+  { key: "name", label: "Vendor Name" },
+  { key: "company", label: "Company" },
+  { key: "address", label: "Address" },
+  { key: "phone", label: "Phone" },
+  { key: "payable", label: "Payable" },
+];
+
+useEffect(() => {
+  window.downloadVendors = () =>
+    downloadExcel(exportData, "Vendors");
+
+  window.downloadVendorsPDF = () =>
+    downloadPDF(exportData, exportColumns, "Vendors");
+
+  window.addVendor = () => navigate("/vendors");
+
+  return () => {
+    delete window.downloadVendors;
+    delete window.downloadVendorsPDF;
+    delete window.addVendor;
+  };
+}, [exportData, exportColumns]);
 
   const fetchVendors = async () => {
     try {
@@ -204,17 +246,7 @@ phone: v.contact_no_1 || "-",
 
   searchPlaceholder="Search vendors..."
 
-  headerActions={
-    <Button
-      variant="navy"
-      size="sm"
-      className="flex items-center gap-2"
-      onClick={() => navigate("/vendors")}
-    >
-      <FiPlus size={14} />
-      Add Vendor
-    </Button>
-  }
+headerActions={null}
 
   onRowClick={(row) => navigate(`/vendors/${row.id}`)}
 

@@ -33,6 +33,7 @@ import CreateSalesReturn from "../pages/Sales/Createsalesreturn";
 import CreditNoteList from "../pages/Sales/Creditnotelist";
 import CreateCreditNote from "../pages/Sales/CreateCreditNote";
 import GSTR1Reports from "../pages/Reports/Gstr1reports";
+import SubscriptionPage from "../pages/Profile/SubscriptionPage";
 
 
 
@@ -79,6 +80,7 @@ const AppRoutes = () => {
 <Route path="/credit-note" element={<CreditNoteList />} />
 <Route path="/credit-note/new" element={<CreateCreditNote />} />
 <Route path="/reports/gstr1-sales" element={<GSTR1Reports />} />
+<Route path="/subscription" element={<SubscriptionPage />} />
         </Route>
 
       </Route>

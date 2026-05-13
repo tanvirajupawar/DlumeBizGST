@@ -6,7 +6,7 @@ import PurchaseReturnModal from "../../components/Purchasereturnmodal";
 import DebitNoteModal from "../../components/DebitNoteModal";
 import ActionMenu from "../../components/ActionMenu";
 import PaymentSuccessScreen from "../Payment/PaymentSuccessScreen";
-
+import { downloadExcel, downloadPDF } from "../../utils/exportUtils";
 
 
 const FILTERS = [
@@ -147,11 +147,26 @@ const openPrintWindow = (title, tableHTML) => {
   setTimeout(() => win.print(), 300);
 };
 
-const shareLink = () => {
-  const url = window.location.href;
-  if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => alert("Link copied!"));
-  else prompt("Copy this link:", url);
+
+
+const generatePDFFile = async (data, columns, title) => {
+  const { jsPDF } = await import("jspdf");
+  const autoTable = (await import("jspdf-autotable")).default;
+
+  const doc = new jsPDF();
+
+  autoTable(doc, {
+    head: [columns.map(c => c.label)],
+    body: data.map(row => columns.map(c => row[c.key])),
+  });
+
+  const blob = doc.output("blob");
+
+  return new File([blob], `${title}.pdf`, {
+    type: "application/pdf",
+  });
 };
+
 
 // ── helper: get balance for a row ─────────────────────────────────────────────
 const getBalance = (r) => {
@@ -312,26 +327,7 @@ const toggleRow = (id) => {
 const selectedInvoices = invoices.filter(r =>
   selected.includes(String(r._id))
 );
-  const handleDownload = () => {
-    downloadCSV("invoices.csv",
-      ["Date", "Invoice No", "Amount", "Balance", "Status"],
-      invoices.map(r => [fmtDate(r.invoice_date), r.supplier_invoice_no || "—", r.total_amount || 0, getBalance(r), r.payment_status || "—"])
-    );
-  };
 
-  const handlePrint = () => {
-    const tableHTML = `<table><thead><tr><th>Date</th><th>Invoice No</th><th>Amount</th><th>Balance</th><th>Status</th></tr></thead><tbody>
-      ${invoices.map(r => `<tr><td>${fmtDate(r.invoice_date)}</td><td>${r.supplier_invoice_no || "—"}</td>
-        <td>₹${Number(r.total_amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-<td>${
-  getBalance(r) > 0
-    ? "₹" + Number(getBalance(r)).toLocaleString("en-IN", { minimumFractionDigits: 2 })
-    : "—"
-}</td>
-        <td>${r.payment_status || "—"}</td></tr>`).join("")}
-    </tbody></table>`;
-    openPrintWindow("Invoices", tableHTML);
-  };
 
   const cols = [
     {
@@ -417,15 +413,59 @@ if (showSuccess) {
     />
   );
 }
+const getInvoiceExportData = () =>
+  invoices.map((r) => ({
+    date: fmtDate(r.invoice_date),
+    invoice: r.supplier_invoice_no || "-",
+    amount: r.total_amount || 0,
+    balance: getBalance(r),
+    status: r.payment_status || "-",
+  }));
 
+const invoiceColumns = [
+  { key: "date", label: "Date" },
+  { key: "invoice", label: "Invoice No" },
+  { key: "amount", label: "Amount" },
+  { key: "balance", label: "Balance" },
+  { key: "status", label: "Status" },
+];
+
+const handleExcel = () => {
+  downloadExcel(getInvoiceExportData(), "Purchase Invoices");
+};
+
+const handlePDF = () => {
+  downloadPDF(getInvoiceExportData(), invoiceColumns, "Purchase Invoices");
+};
+
+const sharePDF = async () => {
+  try {
+    const file = await generatePDFFile(
+      getInvoiceExportData(),
+      invoiceColumns,
+      "Purchase Invoices"
+    );
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        title: "Invoice PDF",
+        files: [file],
+      });
+    } else {
+      alert("Sharing not supported");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+};
 
   return (
     <>
       <div className="flex gap-2.5 mb-4 flex-wrap">
         <DateFilter showFilter={showFilter} setShowFilter={setShowFilter} selectedFilter={selectedFilter} setSelectedFilter={setSelectedFilter} hoveredFilter={hoveredFilter} setHoveredFilter={setHoveredFilter} filterRef={filterRef} />
-        <ActionBtn icon={Ico.Download} label="Download" onClick={handleDownload} />
-        <ActionBtn icon={Ico.Print}    label="Print"    onClick={handlePrint} />
-        <button onClick={shareLink}
+       <ActionBtn icon={Ico.Download} label="Excel" onClick={handleExcel} />
+<ActionBtn icon={Ico.Download} label="PDF" onClick={handlePDF} />
+        <button onClick={sharePDF}
           className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition">
           <Ico.Share /> Share <Ico.Chevron />
         </button>
@@ -782,6 +822,30 @@ function ProfileTab({ vendor, onVendorUpdate }) {
 
 // ── Tab: Ledger ──────────────────────────────────────────────────────────────
 function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+
+
+  const sharePDF = async () => {
+  try {
+    const file = await generatePDFFile(
+      getLedgerExportData(),
+      ledgerColumns,
+      "Ledger"
+    );
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        title: "Ledger PDF",
+        files: [file],
+      });
+    } else {
+      alert("Sharing not supported");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState({ totalReceivable: 0, dateRange: "" });
@@ -823,14 +887,43 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
     { key: "runningBalance", label: "Balance (₹)", render: r => <span className={`font-semibold tabular-nums ${r.runningBalance < 0 ? "text-red-600" : r.runningBalance > 0 ? "text-gray-800" : "text-gray-400"}`}>{r.runningBalance < 0 ? `(${fmt(Math.abs(r.runningBalance))})` : fmt(r.runningBalance)}</span> },
   ];
 
+  const getLedgerExportData = () =>
+  entries.map((r) => ({
+    date: fmtDate(r.date),
+    voucher: r.voucher,
+    ref: r.number,
+    credit: r.credit || "",
+    debit: r.debit || "",
+    balance: r.runningBalance || 0,
+  }));
+
+const ledgerColumns = [
+  { key: "date", label: "Date" },
+  { key: "voucher", label: "Voucher" },
+  { key: "ref", label: "Ref No" },
+  { key: "credit", label: "Credit" },
+  { key: "debit", label: "Debit" },
+  { key: "balance", label: "Balance" },
+];
+
+const handleLedgerExcel = () => {
+  downloadExcel(getLedgerExportData(), "Ledger");
+};
+
+const handleLedgerPDF = () => {
+  downloadPDF(getLedgerExportData(), ledgerColumns, "Ledger");
+};
+
   return (
     <>
       <div className="flex gap-2.5 mb-4 flex-wrap">
         <DateFilter showFilter={showFilter} setShowFilter={setShowFilter} selectedFilter={selectedFilter} setSelectedFilter={setSelectedFilter} hoveredFilter={hoveredFilter} setHoveredFilter={setHoveredFilter} filterRef={filterRef} />
-        <ActionBtn icon={Ico.Download} label="Download" onClick={() => downloadCSV("ledger.csv", ["Date","Voucher","Ref No","Credit","Debit","Balance"], entries.map(r => [fmtDate(r.date), r.voucher, r.number, r.credit || "—", r.debit || "—", r.runningBalance]))} />
-        <ActionBtn icon={Ico.Print} label="Print" onClick={() => openPrintWindow(`Ledger — ${vendor.vendor_name}`, `<table><thead><tr><th>Date</th><th>Voucher</th><th>Ref No</th><th>Credit</th><th>Debit</th><th>Balance</th></tr></thead><tbody>${entries.map(r => `<tr><td>${fmtDate(r.date)}</td><td>${r.voucher}</td><td>${r.number}</td><td>${r.credit > 0 ? fmt(r.credit) : "—"}</td><td>${r.debit > 0 ? fmt(r.debit) : "—"}</td><td>${fmt(r.runningBalance)}</td></tr>`).join("")}</tbody></table>`)} />
-        <button onClick={shareLink} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition"><Ico.Share /> Share <Ico.Chevron /></button>
-      </div>
+       <ActionBtn icon={Ico.Download} label="Excel" onClick={handleLedgerExcel} />
+<ActionBtn icon={Ico.Download} label="PDF" onClick={handleLedgerPDF} />
+<button onClick={sharePDF}
+  className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition">
+  <Ico.Share /> Share <Ico.Chevron />
+</button>      </div>
       <div className="border border-gray-200 rounded-xl overflow-visible">
         <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-start">
           <div><p className="text-[17px] font-bold text-gray-900">D&apos;Lume</p><p className="text-[12px] text-indigo-500 mt-0.5">Phone no: &nbsp;9137826646</p></div>
@@ -865,6 +958,28 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
 
 // ── Tab: Payments ─────────────────────────────────────────────────────────────
 function PaymentsTab({ vendorId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+
+const sharePDF = async () => {
+  try {
+    const file = await generatePDFFile(
+      getPaymentExportData(),
+      paymentColumns,
+      "Payments"
+    );
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({
+        title: "Payments PDF",
+        files: [file],
+      });
+    } else {
+      alert("Sharing not supported");
+    }
+  } catch (err) {
+    console.error(err);
+  }
+};
+
   const [payments, setPayments] = useState([]);
   const [loading, setLoading]   = useState(true);
 
@@ -898,13 +1013,36 @@ function PaymentsTab({ vendorId, showFilter, setShowFilter, selectedFilter, setS
     { key: "status",       label: "Status",       render: () => <span className="px-2 py-[3px] text-xs rounded-full bg-green-100 text-green-700 border border-green-300">Paid</span> },
   ];
 
+  const getPaymentExportData = () =>
+  payments.map((r) => ({
+    date: fmtDate(r.date || r.payment_date),
+    payment_no: r.payment_no || "-",
+    amount: r.amount || 0,
+    mode: r.payment_mode || "-",
+  }));
+
+const paymentColumns = [
+  { key: "date", label: "Date" },
+  { key: "payment_no", label: "Payment No" },
+  { key: "amount", label: "Amount" },
+  { key: "mode", label: "Mode" },
+];
+
+const handlePaymentExcel = () => {
+  downloadExcel(getPaymentExportData(), "Payments");
+};
+
+const handlePaymentPDF = () => {
+  downloadPDF(getPaymentExportData(), paymentColumns, "Payments");
+};
+
   return (
     <>
       <div className="flex gap-2.5 mb-4 flex-wrap">
         <DateFilter showFilter={showFilter} setShowFilter={setShowFilter} selectedFilter={selectedFilter} setSelectedFilter={setSelectedFilter} hoveredFilter={hoveredFilter} setHoveredFilter={setHoveredFilter} filterRef={filterRef} />
-        <ActionBtn icon={Ico.Download} label="Download" onClick={() => downloadCSV("payments.csv", ["Date","Payment No","Amount","Mode"], payments.map(r => [fmtDate(r.date), r.payment_no || "—", r.amount, r.payment_mode || "—"]))} />
-        <ActionBtn icon={Ico.Print}    label="Print"    onClick={() => openPrintWindow("Payments", `<table><thead><tr><th>Date</th><th>Payment No</th><th>Amount</th><th>Mode</th></tr></thead><tbody>${payments.map(r => `<tr><td>${fmtDate(r.date)}</td><td>${r.payment_no || "—"}</td><td>${fmt(r.amount)}</td><td>${r.payment_mode || "—"}</td></tr>`).join("")}</tbody></table>`)} />
-        <button onClick={shareLink} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition"><Ico.Share /> Share <Ico.Chevron /></button>
+     <ActionBtn icon={Ico.Download} label="Excel" onClick={handlePaymentExcel} />
+<ActionBtn icon={Ico.Download} label="PDF" onClick={handlePaymentPDF} />
+        <button onClick={sharePDF} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition"><Ico.Share /> Share <Ico.Chevron /></button>
       </div>
       {loading ? <p className="text-sm text-gray-400 py-8 text-center">Loading...</p> : <TableView cols={cols} rows={payments} />}
     </>

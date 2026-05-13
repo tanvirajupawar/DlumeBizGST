@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import axios from "axios";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { downloadExcel, downloadPDF } from "../../utils/exportUtils";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -15,6 +14,29 @@ const FILTERS = [
 ];
 
 const SELLER_STATE = "27"; // Maharashtra
+
+const TAB_DESCRIPTIONS = {
+  B2B:
+    "Details of invoices of taxable supplies made to other registered taxpayers.",
+
+  B2CL:
+    "Invoices for taxable outward supplies to consumers where (a) place of supply is outside the supplier state and (b) invoice value is more than ₹2,50,000.",
+
+  B2CS:
+    "Supplies made to consumers and unregistered persons. (a) Intra-state: any value (b) Inter-state: invoice value ₹2.5 lakh or less.",
+
+  "Credit Note / Sales Return":
+    "Credit/Debit notes issued to registered taxpayers during the tax period against original invoices reported earlier.",
+
+  "HSN Summary":
+    "Summary of outward supplies grouped by HSN code including quantity, taxable value and GST.",
+
+  "Sales Summary":
+    "Overall sales summary with GST slab-wise taxable value and tax breakup.",
+
+  "Sales Report":
+    "Complete sales register including invoice details, customer GSTIN and tax breakup.",
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -125,8 +147,7 @@ function calcSalesTax(s) {
     (s.details?.length > 0
       ? s.details.reduce((sum, i) => sum + (i.amount || (Number(i.qty || 0) * Number(i.price || 0) - Number(i.discount || 0))), 0)
       : 0) ||
-    Number(s.taxable_amount) ||
-    0;
+    Number(s.taxable_amount) || 0;
 
   const gstRate = s.details?.[0]?.gst_rate || 18;
 
@@ -139,11 +160,30 @@ function calcSalesTax(s) {
   }
 
   const posCode = customerState || "";
-  const placeOfSupply = posCode && STATE_NAMES[posCode] ? `${posCode} – ${STATE_NAMES[posCode]}` : "—";
+  const placeOfSupply = posCode && STATE_NAMES[posCode]
+    ? `${posCode} – ${STATE_NAMES[posCode]}` : "—";
 
-  return { gstin, customerName, isIntra, taxable, gstRate, igst, cgst, sgst, total: igst + cgst + sgst, placeOfSupply };
+  // Derive GST category from invoice_category + amount + interstate logic
+  let invoiceType = s.invoice_category || "B2CS";
+  if (invoiceType === "B2C") {
+    // Auto-classify: interstate + > 2.5L = B2CL, everything else = B2CS
+    if (!isIntra && (s.total_amount || 0) > 250000) {
+      invoiceType = "B2CL";
+    } else {
+      invoiceType = "B2CS";
+    }
+  }
+
+  const reverseCharge = s.reverse_charge === true || s.reverse_charge === "Y" ? "Y" : "N";
+  const hsn = s.details?.[0]?.hsn || s.details?.[0]?.hsn_code || "—";
+ const ecomGstin = "";
+
+  return {
+    gstin, customerName, isIntra, taxable, gstRate,
+    igst, cgst, sgst, total: igst + cgst + sgst,
+    placeOfSupply, invoiceType, reverseCharge, hsn, ecomGstin,
+  };
 }
-
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Badge({ children, color }) {
@@ -219,7 +259,7 @@ function DateFilter({ selected, onChange }) {
         </svg>
       </div>
       {open && (
-        <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", width: 270, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 8px 30px rgba(0,0,0,0.1)", zIndex: 100, overflow: "hidden" }}>
+        <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", width: 270, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 8px 30px rgba(0,0,0,0.1)", zIndex: 9999, overflow: "hidden" }}>
           <div style={{ padding: "8px 14px", fontSize: "10px", fontWeight: 600, color: "#9ca3af", background: "#f9fafb", borderBottom: "1px solid #f3f4f6", textTransform: "uppercase", letterSpacing: "0.06em" }}>
             Select date range
           </div>
@@ -250,9 +290,16 @@ const TH_STYLE = {
   borderBottom: "1px solid #e5e7eb", background: "#f9fafb",
   textAlign: "center", whiteSpace: "nowrap",
 };
-const TD_STYLE = { padding: "10px 10px", fontSize: "12.5px", color: "#111827", textAlign: "center", borderTop: "1px solid #f3f4f6" };
-const TF_STYLE = { padding: "9px 10px", fontSize: "12px", fontWeight: 700, background: "#f9fafb", borderTop: "2px solid #e5e7eb", textAlign: "center" };
-
+const TD_STYLE = { 
+  padding: "10px 10px", fontSize: "12.5px", color: "#111827", 
+  textAlign: "center", borderTop: "1px solid #f3f4f6", 
+  whiteSpace: "nowrap"   // ← add this
+};
+const TF_STYLE = { 
+  padding: "9px 10px", fontSize: "12px", fontWeight: 700, 
+  background: "#f9fafb", borderTop: "2px solid #e5e7eb", 
+  textAlign: "center", whiteSpace: "nowrap"   // ← add this
+};
 
 // ─── Tab: Sales Report ────────────────────────────────────────────────────────
 
@@ -271,69 +318,163 @@ function SalesReportTab({ data, filter }) {
     };
   }, { value: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, total: 0 }), [rows]);
 
+  // KPI extras
+  const b2bCount  = rows.filter(s => s.invoice_category === "B2B").length;
+  const b2cCount  = rows.filter(s => s.invoice_category !== "B2B").length;
+  const rcCount   = rows.filter(s => s.reverse_charge === true || s.reverse_charge === "Y").length;
+
+const TYPE_COLORS = {
+  B2B: "blue", B2CL: "purple", B2CS: "gray",
+};
+
+  const COLUMNS = [
+    "GSTIN / UIN",
+    "Customer Name",
+    "Invoice No.",
+    "Invoice Date",
+    "Invoice Type",
+    "Place of Supply",
+    "Rev. Charge",
+    "Rate %",
+    "HSN / SAC",
+    "Invoice Value",
+    "Taxable Value",
+    "IGST",
+    "CGST",
+    "SGST",
+    "Total Tax",
+  ];
+
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 18 }}>
+      {/* ── KPI Row ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 18 }}>
         <KpiCard label="Total Invoices"      value={rows.length} />
-        <KpiCard label="Total Invoice Value" value={`₹ ${fmt(totals.value)}`} />
+        <KpiCard label="B2B Invoices"        value={b2bCount} />
+        <KpiCard label="B2C Invoices"        value={b2cCount} />
+        <KpiCard label="Reverse Charge"      value={rcCount} danger={rcCount > 0} />
         <KpiCard label="Total Taxable Value" value={`₹ ${fmt(totals.taxable)}`} />
         <KpiCard label="Total GST Collected" value={`₹ ${fmt(totals.total)}`} accent />
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+      {/* ── Table ── */}
+    <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflowX: "auto", overflowY: "visible" }}>
+
+<table style={{ width: "max-content", minWidth: "100%", borderCollapse: "collapse", fontSize: "11.5px" }}>
           <thead>
+            {/* Group row */}
             <tr>
-              <th colSpan={2} style={TH_STYLE}></th>
-              <th colSpan={3} style={{ ...TH_STYLE, textAlign: "center", borderLeft: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb" }}>Invoice Details</th>
-              <th colSpan={4} style={{ ...TH_STYLE, textAlign: "center" }}>Tax Breakdown</th>
+              <th colSpan={4} style={{ ...TH_STYLE, textAlign: "left", paddingLeft: 12 }}>Recipient & Invoice</th>
+              <th colSpan={4} style={{ ...TH_STYLE, borderLeft: "1px solid #e5e7eb", borderRight: "1px solid #e5e7eb" }}>GST Classification</th>
+              <th colSpan={2} style={{ ...TH_STYLE, borderRight: "1px solid #e5e7eb" }}>Values</th>
+<th colSpan={5} style={{ ...TH_STYLE }}>Tax Breakdown</th>           
             </tr>
+            {/* Column row */}
             <tr>
-              {["GSTIN", "Customer Name", "Invoice No.", "Invoice Date", "Place of Supply", "Invoice Value", "Taxable Value", "IGST", "CGST", "SGST", "Total Tax", "Type"].map(h => (
-                <th key={h} style={TH_STYLE}>{h}</th>
-              ))}
+              {COLUMNS.map(h => <th key={h} style={TH_STYLE}>{h}</th>)}
             </tr>
           </thead>
+
           <tbody>
-            {rows.length === 0 ? <EmptyState colSpan={12} /> : rows.map((s, i) => {
-              const t = calcSalesTax(s);
-              const isB2B = t.gstin.length === 15;
-              return (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                  <td style={{ ...TD_STYLE, fontFamily: "monospace", fontSize: "11px" }}>{t.gstin || "—"}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "left", fontWeight: 500 }}>{t.customerName}</td>
-                  <td style={{ ...TD_STYLE, fontFamily: "monospace" }}>{s.invoice_no || s.order_no || "—"}</td>
-                  <td style={TD_STYLE}>{fmtDate(s.invoice_date)}</td>
-                  <td style={TD_STYLE}>{t.placeOfSupply}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.total_amount)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.igst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.cgst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.sgst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(t.total)}</td>
-                  <td style={TD_STYLE}>
-                    <Badge color={isB2B ? "blue" : "gray"}>{isB2B ? "B2B" : "B2C"}</Badge>
-                  </td>
-                </tr>
-              );
-            })}
+            {rows.length === 0
+              ? <EmptyState colSpan={COLUMNS.length} />
+              : rows.map((s, i) => {
+                  const t = calcSalesTax(s);
+                  const typeColor = TYPE_COLORS[t.invoiceType] || "gray";
+                  return (
+                    <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+                      {/* GSTIN */}
+                      <td style={{ ...TD_STYLE, fontFamily: "monospace", fontSize: "10.5px", color: t.gstin ? "#111827" : "#9ca3af" }}>
+                        {t.gstin || "-"}
+                      </td>
+                      {/* Customer Name */}
+                      <td style={{ ...TD_STYLE, textAlign: "left", fontWeight: 500, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {t.customerName}
+                      </td>
+                      {/* Invoice No */}
+                      <td style={{ ...TD_STYLE, fontFamily: "monospace" }}>
+                        {s.invoice_no || s.order_no || "—"}
+                      </td>
+                      {/* Invoice Date */}
+                      <td style={TD_STYLE}>{fmtDate(s.invoice_date)}</td>
+
+                      {/* Invoice Type */}
+                      <td style={TD_STYLE}>
+                        <Badge color={typeColor}>{t.invoiceType}</Badge>
+                      </td>
+                      {/* Place of Supply */}
+                      <td style={TD_STYLE}>{t.placeOfSupply}</td>
+                      {/* Reverse Charge */}
+                      <td style={{ ...TD_STYLE }}>
+                        <Badge color={t.reverseCharge === "Y" ? "red" : "gray"}>
+                          {t.reverseCharge}
+                        </Badge>
+                      </td>
+                      {/* Rate % */}
+                      <td style={TD_STYLE}>
+                        <Badge color="blue">{t.gstRate}%</Badge>
+                      </td>
+
+                      {/* HSN/SAC */}
+                      <td style={{ ...TD_STYLE, fontFamily: "monospace" }}>{t.hsn}</td>
+                      {/* Invoice Value */}
+                      <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.total_amount)}</td>
+
+                      {/* Taxable Value */}
+                      <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
+                      {/* IGST */}
+                      <td style={{ ...TD_STYLE, textAlign: "right", color: t.igst > 0 ? "#111827" : "#d1d5db" }}>
+                        ₹ {fmt(t.igst)}
+                      </td>
+                      {/* CGST */}
+                      <td style={{ ...TD_STYLE, textAlign: "right", color: t.cgst > 0 ? "#111827" : "#d1d5db" }}>
+                        ₹ {fmt(t.cgst)}
+                      </td>
+                      {/* SGST */}
+                      <td style={{ ...TD_STYLE, textAlign: "right", color: t.sgst > 0 ? "#111827" : "#d1d5db" }}>
+                        ₹ {fmt(t.sgst)}
+                      </td>
+                      {/* Total Tax */}
+                      <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(t.total)}</td>
+
+                    
+                    </tr>
+                  );
+                })
+            }
           </tbody>
+
           {rows.length > 0 && (
             <tfoot>
               <tr>
-                <td colSpan={5} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Totals</td>
+                <td colSpan={9} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 12 }}>
+                  Totals ({rows.length} invoices)
+                </td>
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.value)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.taxable)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.igst)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.cgst)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.sgst)}</td>
                 <td style={{ ...TF_STYLE, textAlign: "right", color: "#1d4ed8" }}>₹ {fmt(totals.total)}</td>
-                <td style={TF_STYLE}></td>
+                <td style={TF_STYLE} />
               </tr>
             </tfoot>
           )}
         </table>
       </div>
+
+{/* ── CA Note ── */}
+<div style={{
+  marginTop: 12, padding: "8px 14px", background: "#fffbeb",
+  border: "1px solid #fde68a", borderRadius: 8,
+  fontSize: "11px", color: "#92400e", lineHeight: 1.6,
+}}>
+  <strong>CA Note:</strong> Invoice Type is auto-derived from your B2B/B2C selection —{" "}
+  <strong>B2B</strong> Registered buyer (has GSTIN) ·{" "}
+  <strong>B2CL</strong> Unregistered, interstate &gt; ₹2.5L ·{" "}
+  <strong>B2CS</strong> Unregistered, all others.{" "}
+  Rev. Charge <strong>Y</strong> = recipient liable to pay GST.
+</div>
     </>
   );
 }
@@ -342,10 +483,9 @@ function SalesReportTab({ data, filter }) {
 
 function B2BTab({ data, filter }) {
   const allRows = filterByDate(data, filter, "invoice_date");
-  const rows = allRows.filter((s) => {
-    const { gstin } = extractCustomerInfo(s);
-    return gstin.length === 15;
-  });
+const rows = allRows.filter(
+  (s) => s.invoice_category === "B2B"
+);
 
   const totals = useMemo(() => rows.reduce((acc, s) => {
     const t = calcSalesTax(s);
@@ -372,20 +512,18 @@ function B2BTab({ data, filter }) {
           <thead>
             <tr>
               {[
-                "GSTIN/UIN of Recipient",
-                "Receivers Name",
-                "Invoice No.",
-                "Invoice Date",
-                "Invoice Value",
-                "Place of Supply",
-                "Reverse Charge",
-                "Applicable Tax %",
-                "Invoice Type",
-                "Rate",
-                "Taxable Value",
-                "CESS",
-                "Ecommerce GSTIN",
-              ].map(h => (
+  "GSTIN/UIN of Recipient",
+  "Receiver Name",
+  "Invoice No.",
+  "Invoice Date",
+  "Place of Supply",
+  "Invoice Value",
+  "Rate",
+  "Taxable Value",
+  "IGST",
+  "CGST",
+  "SGST",
+].map(h => (
                 <th key={h} style={TH_STYLE}>{h}</th>
               ))}
             </tr>
@@ -396,45 +534,82 @@ function B2BTab({ data, filter }) {
             ) : rows.map((s, i) => {
               const t = calcSalesTax(s);
               const rate = s.details?.[0]?.gst_rate ?? 18;
-              const invoiceType = t.isIntra ? "Regular" : "Inter-State";
               return (
                 <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
                   <td style={{ ...TD_STYLE, fontFamily: "monospace", fontSize: "11px" }}>{t.gstin}</td>
                   <td style={{ ...TD_STYLE, textAlign: "left", fontWeight: 500 }}>{t.customerName}</td>
                   <td style={{ ...TD_STYLE, fontFamily: "monospace" }}>{s.invoice_no || "—"}</td>
                   <td style={TD_STYLE}>{fmtDate(s.invoice_date)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.total_amount)}</td>
-                  <td style={TD_STYLE}>{t.placeOfSupply}</td>
-                  <td style={TD_STYLE}>
-                    <Badge color={s.reverse_charge ? "amber" : "gray"}>{s.reverse_charge ? "Y" : "N"}</Badge>
-                  </td>
-                  <td style={TD_STYLE}>
-                    <Badge color="blue">{rate}%</Badge>
-                  </td>
-                  <td style={TD_STYLE}>
-                    <Badge color={t.isIntra ? "green" : "purple"}>{invoiceType}</Badge>
-                  </td>
-                  <td style={TD_STYLE}>
-                    <Badge color="blue">{rate}%</Badge>
-                  </td>
+                <td style={TD_STYLE}>
+  {t.placeOfSupply}
+</td>
+
+<td style={{ ...TD_STYLE, textAlign: "right" }}>
+  ₹ {fmt(s.total_amount)}
+</td>
+
+<td style={TD_STYLE}>
+  <Badge color="blue">{rate}%</Badge>
+</td>
+                  
+                
+               
+                 
                   <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.cess || 0)}</td>
-                  <td style={{ ...TD_STYLE, fontFamily: "monospace", fontSize: "11px" }}>{s.ecommerce_gstin || "—"}</td>
+                  <td style={{ ...TD_STYLE, textAlign: "right" }}>
+  ₹ {fmt(t.igst)}
+</td>
+
+<td style={{ ...TD_STYLE, textAlign: "right" }}>
+  ₹ {fmt(t.cgst)}
+</td>
+
+<td style={{ ...TD_STYLE, textAlign: "right" }}>
+  ₹ {fmt(t.sgst)}
+</td>
                 </tr>
               );
             })}
           </tbody>
           {rows.length > 0 && (
-            <tfoot>
-              <tr>
-                <td colSpan={4} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Totals</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.value)}</td>
-                <td colSpan={5} style={TF_STYLE}></td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.taxable)}</td>
-                <td style={TF_STYLE}>₹ 0.00</td>
-                <td style={TF_STYLE}></td>
-              </tr>
-            </tfoot>
+          <tfoot>
+  <tr>
+
+    <td
+      colSpan={5}
+      style={{
+        ...TF_STYLE,
+        textAlign: "left",
+        paddingLeft: 10,
+      }}
+    >
+      Totals
+    </td>
+
+    <td style={{ ...TF_STYLE, textAlign: "right" }}>
+      ₹ {fmt(totals.value)}
+    </td>
+
+    <td style={TF_STYLE}></td>
+
+    <td style={{ ...TF_STYLE, textAlign: "right" }}>
+      ₹ {fmt(totals.taxable)}
+    </td>
+
+    <td style={{ ...TF_STYLE, textAlign: "right" }}>
+      ₹ {fmt(totals.igst)}
+    </td>
+
+    <td style={{ ...TF_STYLE, textAlign: "right" }}>
+      ₹ {fmt(totals.cgst)}
+    </td>
+
+    <td style={{ ...TF_STYLE, textAlign: "right" }}>
+      ₹ {fmt(totals.sgst)}
+    </td>
+
+  </tr>
+</tfoot>
           )}
         </table>
       </div>
@@ -445,88 +620,226 @@ function B2BTab({ data, filter }) {
 // ─── Tab: B2CL ────────────────────────────────────────────────────────────────
 
 function B2CLTab({ data, filter }) {
-  const allRows = filterByDate(data, filter, "invoice_date");
-  const rows = allRows.filter((s) => {
-    const { gstin } = extractCustomerInfo(s);
-    const customerState = gstin.substring(0, 2);
-    const isInter = customerState && customerState !== SELLER_STATE;
-    return gstin.length !== 15 && isInter && (s.total_amount || 0) > 250000;
-  });
 
-  const totals = useMemo(() => rows.reduce((acc, s) => {
-    const t = calcSalesTax(s);
-    return { value: acc.value + (s.total_amount || 0), taxable: acc.taxable + t.taxable, igst: acc.igst + t.igst, total: acc.total + t.total };
-  }, { value: 0, taxable: 0, igst: 0, total: 0 }), [rows]);
+  const allRows = filterByDate(data, filter, "invoice_date");
+
+  const rows = allRows.filter(
+    (s) => s.invoice_category === "B2CL"
+  );
+
+  const totals = useMemo(() =>
+    rows.reduce((acc, s) => {
+
+      const t = calcSalesTax(s);
+
+      return {
+        value: acc.value + (s.total_amount || 0),
+        taxable: acc.taxable + t.taxable,
+        igst: acc.igst + t.igst,
+        total: acc.total + t.total,
+      };
+
+    }, {
+      value: 0,
+      taxable: 0,
+      igst: 0,
+      total: 0,
+    }),
+  [rows]);
 
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="Number of Invoices"  value={rows.length} />
-        <KpiCard label="Total Invoice Value" value={`₹ ${fmt(totals.value)}`} />
-        <KpiCard label="Total Taxable Value" value={`₹ ${fmt(totals.taxable)}`} />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+        <KpiCard
+          label="Number of Invoices"
+          value={rows.length}
+        />
+
+        <KpiCard
+          label="Total Invoice Value"
+          value={`₹ ${fmt(totals.value)}`}
+        />
+
+        <KpiCard
+          label="Total Taxable Value"
+          value={`₹ ${fmt(totals.taxable)}`}
+        />
       </div>
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", minWidth: 900 }}>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          overflow: "auto",
+        }}
+      >
+
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "12px",
+            minWidth: 900,
+          }}
+        >
+
           <thead>
             <tr>
               {[
                 "Invoice No.",
                 "Invoice Date",
-                "Invoice Value",
                 "Place of Supply",
-                "Reverse Charge",
-                "Applicable Tax %",
+                "Invoice Value",
                 "Rate",
                 "Taxable Value",
-                "CESS",
-                "Ecommerce GSTIN",
-              ].map(h => (
-                <th key={h} style={TH_STYLE}>{h}</th>
+                "IGST",
+              ].map((h) => (
+                <th key={h} style={TH_STYLE}>
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
+
           <tbody>
-            {rows.length === 0
-              ? <EmptyState colSpan={10} message="No B2CL invoices (interstate unregistered > ₹2.5L)" />
-              : rows.map((s, i) => {
-                const t = calcSalesTax(s);
-                const rate = s.details?.[0]?.gst_rate ?? 18;
-                return (
-                  <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                    <td style={{ ...TD_STYLE, fontFamily: "monospace" }}>{s.invoice_no || "—"}</td>
-                    <td style={TD_STYLE}>{fmtDate(s.invoice_date)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.total_amount)}</td>
-                    <td style={TD_STYLE}>{t.placeOfSupply}</td>
-                    <td style={TD_STYLE}>
-                      <Badge color={s.reverse_charge ? "amber" : "gray"}>{s.reverse_charge ? "Y" : "N"}</Badge>
-                    </td>
-                    <td style={TD_STYLE}>
-                      <Badge color="blue">{rate}%</Badge>
-                    </td>
-                    <td style={TD_STYLE}>
-                      <Badge color="blue">{rate}%</Badge>
-                    </td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.cess || 0)}</td>
-                    <td style={{ ...TD_STYLE, fontFamily: "monospace", fontSize: "11px" }}>{s.ecommerce_gstin || "—"}</td>
-                  </tr>
-                );
-              })}
+
+            {rows.length === 0 ? (
+
+              <EmptyState
+                colSpan={7}
+                message="No B2CL invoices (interstate unregistered > ₹2.5L)"
+              />
+
+            ) : rows.map((s, i) => {
+
+              const t = calcSalesTax(s);
+
+              const rate =
+                s.details?.[0]?.gst_rate ?? 18;
+
+              return (
+
+                <tr
+                  key={i}
+                  style={{
+                    background:
+                      i % 2 === 0
+                        ? "#fff"
+                        : "#fafafa",
+                  }}
+                >
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    {s.invoice_no || "—"}
+                  </td>
+
+                  <td style={TD_STYLE}>
+                    {fmtDate(s.invoice_date)}
+                  </td>
+
+                  <td style={TD_STYLE}>
+                    {t.placeOfSupply}
+                  </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                    }}
+                  >
+                    ₹ {fmt(s.total_amount)}
+                  </td>
+
+                  <td style={TD_STYLE}>
+                    <Badge color="blue">
+                      {rate}%
+                    </Badge>
+                  </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                    }}
+                  >
+                    ₹ {fmt(t.taxable)}
+                  </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                    }}
+                  >
+                    ₹ {fmt(t.igst)}
+                  </td>
+
+                </tr>
+              );
+            })}
+
           </tbody>
+
           {rows.length > 0 && (
+
             <tfoot>
+
               <tr>
-                <td colSpan={2} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Totals</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.value)}</td>
-                <td colSpan={4} style={TF_STYLE}></td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.taxable)}</td>
-                <td style={TF_STYLE}>₹ 0.00</td>
+
+                <td
+                  colSpan={4}
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "left",
+                    paddingLeft: 10,
+                  }}
+                >
+                  Totals
+                </td>
+
                 <td style={TF_STYLE}></td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.taxable)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.igst)}
+                </td>
+
               </tr>
+
             </tfoot>
+
           )}
+
         </table>
+
       </div>
+
     </>
   );
 }
@@ -534,288 +847,998 @@ function B2CLTab({ data, filter }) {
 // ─── Tab: B2CS ────────────────────────────────────────────────────────────────
 
 function B2CSTab({ data, filter }) {
-  const allRows = filterByDate(data, filter, "invoice_date");
-  const rows = allRows.filter((s) => {
-    const { gstin } = extractCustomerInfo(s);
-    const customerState = gstin.substring(0, 2);
-    const isInter = customerState && customerState !== SELLER_STATE;
-    const isSmallInter = gstin.length !== 15 && isInter && (s.total_amount || 0) <= 250000;
-    const isIntra = gstin.length !== 15 && (!customerState || customerState === SELLER_STATE);
-    return isSmallInter || isIntra;
-  });
+
+  const allRows = filterByDate(
+    data,
+    filter,
+    "invoice_date"
+  );
+
+  const rows = allRows.filter(
+    (s) => s.invoice_category === "B2CS"
+  );
 
   const slabMap = useMemo(() => {
+
     const map = {};
+
     rows.forEach((s) => {
+
       const t = calcSalesTax(s);
-      const rate = s.details?.[0]?.gst_rate || 18;
-      const key = `${rate}_${t.placeOfSupply}`;
-      if (!map[key]) map[key] = { rate, placeOfSupply: t.placeOfSupply, taxable: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 };
+
+      const rate =
+        s.details?.[0]?.gst_rate || 18;
+
+      const key =
+        `${rate}_${t.placeOfSupply}`;
+
+      if (!map[key]) {
+
+        map[key] = {
+          rate,
+          placeOfSupply: t.placeOfSupply,
+          taxable: 0,
+          igst: 0,
+          cgst: 0,
+          sgst: 0,
+        };
+      }
+
       map[key].taxable += t.taxable;
-      map[key].igst    += t.igst;
-      map[key].cgst    += t.cgst;
-      map[key].sgst    += t.sgst;
-      map[key].cess    += Number(s.cess || 0);
+      map[key].igst += t.igst;
+      map[key].cgst += t.cgst;
+      map[key].sgst += t.sgst;
+
     });
+
     return Object.values(map);
+
   }, [rows]);
 
-  const totals = useMemo(() => slabMap.reduce((a, r) => ({
-    taxable: a.taxable + r.taxable, igst: a.igst + r.igst, cgst: a.cgst + r.cgst, sgst: a.sgst + r.sgst, cess: a.cess + r.cess
-  }), { taxable: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 }), [slabMap]);
+  const totals = useMemo(() =>
+    slabMap.reduce((a, r) => ({
+
+      taxable: a.taxable + r.taxable,
+
+      igst: a.igst + r.igst,
+
+      cgst: a.cgst + r.cgst,
+
+      sgst: a.sgst + r.sgst,
+
+    }), {
+      taxable: 0,
+      igst: 0,
+      cgst: 0,
+      sgst: 0,
+    }),
+  [slabMap]);
 
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="Total Invoice Value" value={`₹ ${fmt(rows.reduce((a, s) => a + (s.total_amount || 0), 0))}`} />
-        <KpiCard label="Total Taxable Value" value={`₹ ${fmt(totals.taxable)}`} />
-        <KpiCard label="Total CESS"          value={`₹ ${fmt(totals.cess)}`} />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+
+        <KpiCard
+          label="Total Invoice Value"
+          value={`₹ ${fmt(
+            rows.reduce(
+              (a, s) => a + (s.total_amount || 0),
+              0
+            )
+          )}`}
+        />
+
+        <KpiCard
+          label="Total Taxable Value"
+          value={`₹ ${fmt(totals.taxable)}`}
+        />
+
+        <KpiCard
+          label="Total IGST"
+          value={`₹ ${fmt(totals.igst)}`}
+        />
+
       </div>
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", minWidth: 700 }}>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          overflow: "auto",
+        }}
+      >
+
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "12px",
+            minWidth: 700,
+          }}
+        >
+
           <thead>
+
             <tr>
+
               {[
-                "Type",
                 "Place of Supply",
-                "Applicable Tax %",
                 "Rate",
                 "Taxable Value",
-                "CESS",
-                "Ecommerce GSTIN",
-              ].map(h => (
-                <th key={h} style={TH_STYLE}>{h}</th>
+                "IGST",
+                "CGST",
+                "SGST",
+              ].map((h) => (
+
+                <th
+                  key={h}
+                  style={TH_STYLE}
+                >
+                  {h}
+                </th>
+
               ))}
+
             </tr>
+
           </thead>
+
           <tbody>
-            {slabMap.length === 0
-              ? <EmptyState colSpan={7} message="No B2CS invoices for selected period" />
-              : slabMap.map((r, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                  <td style={TD_STYLE}><Badge color="gray">OE</Badge></td>
-                  <td style={TD_STYLE}>{r.placeOfSupply}</td>
-                  <td style={TD_STYLE}><Badge color="blue">{r.rate}%</Badge></td>
-                  <td style={TD_STYLE}><Badge color="blue">{r.rate}%</Badge></td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(r.taxable)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(r.cess)}</td>
-                  <td style={{ ...TD_STYLE, fontFamily: "monospace", fontSize: "11px" }}>—</td>
-                </tr>
-              ))}
-          </tbody>
-          {slabMap.length > 0 && (
-            <tfoot>
-              <tr>
-                <td colSpan={4} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Total</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.taxable)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.cess)}</td>
-                <td style={TF_STYLE}></td>
+
+            {slabMap.length === 0 ? (
+
+              <EmptyState
+                colSpan={6}
+                message="No B2CS invoices for selected period"
+              />
+
+            ) : slabMap.map((r, i) => (
+
+              <tr
+                key={i}
+                style={{
+                  background:
+                    i % 2 === 0
+                      ? "#fff"
+                      : "#fafafa",
+                }}
+              >
+
+                <td style={TD_STYLE}>
+                  {r.placeOfSupply}
+                </td>
+
+                <td style={TD_STYLE}>
+                  <Badge color="blue">
+                    {r.rate}%
+                  </Badge>
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(r.taxable)}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(r.igst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(r.cgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(r.sgst)}
+                </td>
+
               </tr>
+
+            ))}
+
+          </tbody>
+
+          {slabMap.length > 0 && (
+
+            <tfoot>
+
+              <tr>
+
+                <td
+                  colSpan={2}
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "left",
+                    paddingLeft: 10,
+                  }}
+                >
+                  Total
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.taxable)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.igst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.cgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.sgst)}
+                </td>
+
+              </tr>
+
             </tfoot>
+
           )}
+
         </table>
+
       </div>
+
     </>
   );
 }
-
 // ─── Tab: CDNR (Credit Notes / Sales Return) ──────────────────────────────────
 
 function CDNRTab({ data, filter }) {
-  const rows = filterByDate(data, filter, (row) => row.invoice_date || row.date);
 
-  const totals = useMemo(() => rows.reduce((acc, s) => {
-    const t = calcSalesTax(s);
-    return {
-      value:   acc.value   + (s.total_amount || 0),
-      taxable: acc.taxable + t.taxable,
-      igst:    acc.igst    + t.igst,
-      cgst:    acc.cgst    + t.cgst,
-      sgst:    acc.sgst    + t.sgst,
-      total:   acc.total   + t.total,
-    };
-  }, { value: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, total: 0 }), [rows]);
+  const rows = filterByDate(
+    data,
+    filter,
+    (row) => row.invoice_date || row.date
+  );
+
+  const totals = useMemo(() =>
+    rows.reduce((acc, s) => {
+
+      const t = calcSalesTax(s);
+
+      return {
+        value: acc.value + (s.total_amount || 0),
+        taxable: acc.taxable + t.taxable,
+        igst: acc.igst + t.igst,
+        cgst: acc.cgst + t.cgst,
+        sgst: acc.sgst + t.sgst,
+        total: acc.total + t.total,
+      };
+
+    }, {
+      value: 0,
+      taxable: 0,
+      igst: 0,
+      cgst: 0,
+      sgst: 0,
+      total: 0,
+    }),
+  [rows]);
 
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="Total Returns"       value={rows.length} />
-        <KpiCard label="Total Taxable Value" value={`₹ ${fmt(totals.taxable)}`} />
-        <KpiCard label="GST Credit Notes"    value={`₹ ${fmt(totals.total)}`} danger />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+
+        <KpiCard
+          label="Total Returns"
+          value={rows.length}
+        />
+
+        <KpiCard
+          label="Total Taxable Value"
+          value={`₹ ${fmt(totals.taxable)}`}
+        />
+
+        <KpiCard
+          label="GST Credit Notes"
+          value={`₹ ${fmt(totals.total)}`}
+          danger
+        />
+
       </div>
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", minWidth: 1200 }}>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          overflow: "auto",
+        }}
+      >
+
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "12px",
+            minWidth: 1200,
+          }}
+        >
+
           <thead>
+
             <tr>
+
               {[
                 "GSTIN/UIN of Recipient",
-                "Receivers Name",
+                "Receiver Name",
                 "Note Number",
                 "Note Date",
                 "Note Type",
                 "Place of Supply",
-                "Reverse Charge",
-                "Note Supply Type",
-                "Note Value",
-                "Applicable Tax %",
                 "Rate",
                 "Taxable Value",
-                "CESS Amount",
+                "IGST",
+                "CGST",
+                "SGST",
               ].map((h, i) => (
-                <th key={i} style={TH_STYLE}>{h}</th>
+
+                <th
+                  key={i}
+                  style={TH_STYLE}
+                >
+                  {h}
+                </th>
+
               ))}
+
             </tr>
+
           </thead>
+
           <tbody>
+
             {rows.length === 0 ? (
-              <EmptyState colSpan={13} />
+
+              <EmptyState colSpan={11} />
+
             ) : rows.map((s, i) => {
+
               const t = calcSalesTax(s);
-              const isB2B = t.gstin.length === 15;
-              const rate = s.details?.[0]?.gst_rate ?? 18;
-              const noteType = s.note_type || (s.return_no ? "Credit Note" : "Debit Note");
-              const noteSupplyType = t.isIntra ? "Intra-State" : "Inter-State";
+
+              const rate =
+                s.details?.[0]?.gst_rate ?? 18;
+
+              const noteType =
+                s.note_type ||
+                (s.return_no
+                  ? "Credit Note"
+                  : "Debit Note");
+
               return (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                  <td style={{ ...TD_STYLE, fontFamily: "monospace", fontSize: "11px" }}>{t.gstin || "—"}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "left", fontWeight: 500 }}>{t.customerName}</td>
-                  <td style={{ ...TD_STYLE, fontFamily: "monospace" }}>{s.return_no || s.credit_note_no || "—"}</td>
-                  <td style={TD_STYLE}>{fmtDate(s.invoice_date || s.date)}</td>
+
+                <tr
+                  key={i}
+                  style={{
+                    background:
+                      i % 2 === 0
+                        ? "#fff"
+                        : "#fafafa",
+                  }}
+                >
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      fontFamily: "monospace",
+                      fontSize: "11px",
+                    }}
+                  >
+                    {t.gstin || "—"}
+                  </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "left",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {t.customerName}
+                  </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    {s.return_no ||
+                      s.credit_note_no ||
+                      "—"}
+                  </td>
+
                   <td style={TD_STYLE}>
-                    <Badge color={noteType === "Credit Note" ? "red" : "amber"}>{noteType}</Badge>
+                    {fmtDate(
+                      s.invoice_date || s.date
+                    )}
                   </td>
-                  <td style={TD_STYLE}>{t.placeOfSupply}</td>
+
                   <td style={TD_STYLE}>
-                    <Badge color={s.reverse_charge ? "amber" : "gray"}>{s.reverse_charge ? "Y" : "N"}</Badge>
+                    <Badge
+                      color={
+                        noteType === "Credit Note"
+                          ? "red"
+                          : "amber"
+                      }
+                    >
+                      {noteType}
+                    </Badge>
                   </td>
+
                   <td style={TD_STYLE}>
-                    <Badge color={t.isIntra ? "green" : "purple"}>{noteSupplyType}</Badge>
+                    {t.placeOfSupply}
                   </td>
-                  <td style={{ ...TD_STYLE, textAlign: "right", whiteSpace: "nowrap" }}>
-                    ₹ {fmt(s.total_amount)}
-                  </td>
+
                   <td style={TD_STYLE}>
-                    <Badge color="blue">{rate}%</Badge>
+                    <Badge color="blue">
+                      {rate}%
+                    </Badge>
                   </td>
-                  <td style={TD_STYLE}>
-                    <Badge color="blue">{rate}%</Badge>
-                  </td>
-                  <td style={{ ...TD_STYLE, textAlign: "right", whiteSpace: "nowrap" }}>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     ₹ {fmt(t.taxable)}
                   </td>
-                  <td style={{ ...TD_STYLE, textAlign: "right", whiteSpace: "nowrap" }}>
-                    ₹ {fmt(s.cess || 0)}
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ₹ {fmt(t.igst)}
                   </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ₹ {fmt(t.cgst)}
+                  </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ₹ {fmt(t.sgst)}
+                  </td>
+
                 </tr>
               );
             })}
+
           </tbody>
+
           {rows.length > 0 && (
+
             <tfoot>
+
               <tr>
-                <td colSpan={8} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Totals</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", whiteSpace: "nowrap" }}>₹ {fmt(totals.value)}</td>
-                <td colSpan={2} style={TF_STYLE}></td>
-                <td style={{ ...TF_STYLE, textAlign: "right", whiteSpace: "nowrap" }}>₹ {fmt(totals.taxable)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#b91c1c", whiteSpace: "nowrap" }}>₹ 0.00</td>
+
+                <td
+                  colSpan={7}
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "left",
+                    paddingLeft: 10,
+                  }}
+                >
+                  Totals
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ₹ {fmt(totals.taxable)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ₹ {fmt(totals.igst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ₹ {fmt(totals.cgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  ₹ {fmt(totals.sgst)}
+                </td>
+
               </tr>
+
             </tfoot>
+
           )}
+
         </table>
+
       </div>
+
     </>
   );
 }
-
 // ─── Tab: HSN Summary ─────────────────────────────────────────────────────────
 
 function HSNTab({ data, filter }) {
-  const rows = filterByDate(data, filter, "invoice_date");
+
+  const rows = filterByDate(
+    data,
+    filter,
+    "invoice_date"
+  );
 
   const hsnMap = useMemo(() => {
+
     const map = {};
+
     rows.forEach((s) => {
-      const { gstin } = extractCustomerInfo(s);
-      const customerState = gstin.substring(0, 2);
-      const isIntra = customerState === SELLER_STATE || !customerState;
+
+      const isIntra =
+        s.invoice_category !== "B2CL";
 
       (s.details || []).forEach((item) => {
-        const hsn     = item.hsn || item.hsn_code || "—";
-        const desc    = item.product_name || item.name || "—";
-        const uqc     = item.unit || "NOS";
-        const qty     = Number(item.qty) || 0;
-        const taxable = (Number(item.qty) || 0) * (Number(item.price) || 0) - (Number(item.discount) || 0);
-        const rate    = Number(item.gst_rate) || 0;
-        const tax     = (taxable * rate) / 100;
-        const igst    = isIntra ? 0 : tax;
-        const cgst    = isIntra ? tax / 2 : 0;
-        const sgst    = isIntra ? tax / 2 : 0;
 
-        if (!map[hsn]) map[hsn] = { hsn, desc, uqc, qty: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, total: 0 };
-        map[hsn].qty     += qty;
+        const hsn =
+          item.hsn ||
+          item.hsn_code ||
+          "—";
+
+        const desc =
+          item.product_name ||
+          item.name ||
+          "—";
+
+        const uqc =
+          item.unit || "NOS";
+
+        const qty =
+          Number(item.qty) || 0;
+
+        const taxable =
+          ((Number(item.qty) || 0) *
+          (Number(item.price) || 0))
+          - (Number(item.discount) || 0);
+
+        const rate =
+          Number(item.gst_rate) || 0;
+
+        const tax =
+          (taxable * rate) / 100;
+
+        const igst =
+          isIntra ? 0 : tax;
+
+        const cgst =
+          isIntra ? tax / 2 : 0;
+
+        const sgst =
+          isIntra ? tax / 2 : 0;
+
+        if (!map[hsn]) {
+
+          map[hsn] = {
+            hsn,
+            desc,
+            uqc,
+            qty: 0,
+            taxable: 0,
+            igst: 0,
+            cgst: 0,
+            sgst: 0,
+            total: 0,
+          };
+        }
+
+        map[hsn].qty += qty;
+
         map[hsn].taxable += taxable;
-        map[hsn].igst    += igst;
-        map[hsn].cgst    += cgst;
-        map[hsn].sgst    += sgst;
-        map[hsn].total   += taxable + igst + cgst + sgst;
+
+        map[hsn].igst += igst;
+
+        map[hsn].cgst += cgst;
+
+        map[hsn].sgst += sgst;
+
+        map[hsn].total +=
+          taxable + igst + cgst + sgst;
+
       });
+
     });
-    return Object.values(map).sort((a, b) => b.taxable - a.taxable);
+
+    return Object
+      .values(map)
+      .sort((a, b) => b.taxable - a.taxable);
+
   }, [rows]);
 
-  const totals = useMemo(() => hsnMap.reduce((a, r) => ({
-    qty: a.qty + r.qty, taxable: a.taxable + r.taxable,
-    igst: a.igst + r.igst, cgst: a.cgst + r.cgst, sgst: a.sgst + r.sgst, total: a.total + r.total
-  }), { qty: 0, taxable: 0, igst: 0, cgst: 0, sgst: 0, total: 0 }), [hsnMap]);
+  const totals = useMemo(() =>
+    hsnMap.reduce((a, r) => ({
+
+      qty: a.qty + r.qty,
+
+      taxable:
+        a.taxable + r.taxable,
+
+      igst:
+        a.igst + r.igst,
+
+      cgst:
+        a.cgst + r.cgst,
+
+      sgst:
+        a.sgst + r.sgst,
+
+      total:
+        a.total + r.total,
+
+    }), {
+      qty: 0,
+      taxable: 0,
+      igst: 0,
+      cgst: 0,
+      sgst: 0,
+      total: 0,
+    }),
+  [hsnMap]);
 
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="HSN Codes"           value={hsnMap.length} />
-        <KpiCard label="Total Taxable Value" value={`₹ ${fmt(totals.taxable)}`} />
-        <KpiCard label="Total Tax"           value={`₹ ${fmt(totals.igst + totals.cgst + totals.sgst)}`} accent />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+
+        <KpiCard
+          label="HSN Codes"
+          value={hsnMap.length}
+        />
+
+        <KpiCard
+          label="Total Taxable Value"
+          value={`₹ ${fmt(totals.taxable)}`}
+        />
+
+        <KpiCard
+          label="Total Tax"
+          value={`₹ ${fmt(
+            totals.igst +
+            totals.cgst +
+            totals.sgst
+          )}`}
+          accent
+        />
+
       </div>
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          overflow: "hidden",
+        }}
+      >
+
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: "12px",
+          }}
+        >
+
           <thead>
+
             <tr>
-              {["HSN Code", "Description", "UQC", "Total Qty", "Taxable Value", "IGST", "CGST", "SGST", "Total Tax Value"].map(h => (
-                <th key={h} style={TH_STYLE}>{h}</th>
+
+              {[
+                "HSN Code",
+                "Description",
+                "UQC",
+                "Total Qty",
+                "Taxable Value",
+                "IGST",
+                "CGST",
+                "SGST",
+                "Total Value",
+              ].map((h) => (
+
+                <th
+                  key={h}
+                  style={TH_STYLE}
+                >
+                  {h}
+                </th>
+
               ))}
+
             </tr>
+
           </thead>
+
           <tbody>
-            {hsnMap.length === 0
-              ? <EmptyState colSpan={9} message="No HSN data — add HSN codes to your items" />
-              : hsnMap.map((r, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                  <td style={{ ...TD_STYLE, fontWeight: 600, fontFamily: "monospace" }}>{r.hsn}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "left" }}>{r.desc}</td>
-                  <td style={TD_STYLE}>{r.uqc}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>{r.qty.toLocaleString("en-IN")}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(r.taxable)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(r.igst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(r.cgst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(r.sgst)}</td>
-                  <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(r.total)}</td>
-                </tr>
-              ))}
-          </tbody>
-          {hsnMap.length > 0 && (
-            <tfoot>
-              <tr>
-                <td colSpan={3} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Total</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>{totals.qty.toLocaleString("en-IN")}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.taxable)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.igst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.cgst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.sgst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#1d4ed8" }}>₹ {fmt(totals.total)}</td>
+
+            {hsnMap.length === 0 ? (
+
+              <EmptyState
+                colSpan={9}
+                message="No HSN data — add HSN codes to your items"
+              />
+
+            ) : hsnMap.map((r, i) => (
+
+              <tr
+                key={i}
+                style={{
+                  background:
+                    i % 2 === 0
+                      ? "#fff"
+                      : "#fafafa",
+                }}
+              >
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    fontWeight: 600,
+                    fontFamily: "monospace",
+                  }}
+                >
+                  {r.hsn}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "left",
+                  }}
+                >
+                  {r.desc}
+                </td>
+
+                <td style={TD_STYLE}>
+                  {r.uqc}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  {r.qty.toLocaleString("en-IN")}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(r.taxable)}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(r.igst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(r.cgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(r.sgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TD_STYLE,
+                    textAlign: "right",
+                    fontWeight: 700,
+                  }}
+                >
+                  ₹ {fmt(r.total)}
+                </td>
+
               </tr>
+
+            ))}
+
+          </tbody>
+
+          {hsnMap.length > 0 && (
+
+            <tfoot>
+
+              <tr>
+
+                <td
+                  colSpan={3}
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "left",
+                    paddingLeft: 10,
+                  }}
+                >
+                  Total
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  {totals.qty.toLocaleString("en-IN")}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.taxable)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.igst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.cgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.sgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    color: "#1d4ed8",
+                  }}
+                >
+                  ₹ {fmt(totals.total)}
+                </td>
+
+              </tr>
+
             </tfoot>
+
           )}
+
         </table>
+
       </div>
+
     </>
   );
 }
@@ -823,109 +1846,421 @@ function HSNTab({ data, filter }) {
 // ─── Tab: Sales Summary ───────────────────────────────────────────────────────
 
 function SalesSummaryTab({ data, filter }) {
-  const rows = filterByDate(data, filter, "invoice_date");
+
+  const rows = filterByDate(
+    data,
+    filter,
+    "invoice_date"
+  );
 
   const slabs = useMemo(() => {
+
     const map = {};
+
     rows.forEach((s) => {
-      const { gstin } = extractCustomerInfo(s);
-      const customerState = gstin.substring(0, 2);
-      const isIntra = customerState === SELLER_STATE || !customerState;
+
+      const isIntra =
+        s.invoice_category !== "B2CL";
+
       const details = s.details || [];
 
       if (details.length > 0) {
+
         details.forEach((item) => {
-          const rate    = Number(item.gst_rate) || 0;
-          const taxable = (Number(item.qty) || 0) * (Number(item.price) || 0) - (Number(item.discount) || 0);
-          const tax     = (taxable * rate) / 100;
-          if (!map[rate]) map[rate] = { rate, taxable: 0, igst: 0, cgst: 0, sgst: 0, count: 0 };
+
+          const rate =
+            Number(item.gst_rate) || 0;
+
+          const taxable =
+            ((Number(item.qty) || 0) *
+            (Number(item.price) || 0))
+            - (Number(item.discount) || 0);
+
+          const tax =
+            (taxable * rate) / 100;
+
+          if (!map[rate]) {
+
+            map[rate] = {
+              rate,
+              taxable: 0,
+              igst: 0,
+              cgst: 0,
+              sgst: 0,
+              count: 0,
+            };
+          }
+
           map[rate].taxable += taxable;
-          map[rate].count   += 1;
-          if (isIntra) { map[rate].cgst += tax / 2; map[rate].sgst += tax / 2; }
-          else          { map[rate].igst += tax; }
+
+          map[rate].count += 1;
+
+          if (isIntra) {
+
+            map[rate].cgst += tax / 2;
+
+            map[rate].sgst += tax / 2;
+
+          } else {
+
+            map[rate].igst += tax;
+          }
+
         });
+
       } else {
+
         const key = "g";
-        if (!map[key]) map[key] = { rate: null, taxable: 0, igst: 0, cgst: 0, sgst: 0, count: 0 };
-        map[key].taxable += Number(s.taxable_amount) || 0;
-        map[key].igst    += Number(s.igst)           || 0;
-        map[key].cgst    += Number(s.cgst)           || 0;
-        map[key].sgst    += Number(s.sgst)            || 0;
-        map[key].count   += 1;
+
+        if (!map[key]) {
+
+          map[key] = {
+            rate: null,
+            taxable: 0,
+            igst: 0,
+            cgst: 0,
+            sgst: 0,
+            count: 0,
+          };
+        }
+
+        map[key].taxable +=
+          Number(s.taxable_amount) || 0;
+
+        map[key].igst +=
+          Number(s.igst) || 0;
+
+        map[key].cgst +=
+          Number(s.cgst) || 0;
+
+        map[key].sgst +=
+          Number(s.sgst) || 0;
+
+        map[key].count += 1;
       }
+
     });
-    return Object.values(map).sort((a, b) =>
-      a.rate === null ? 1 : b.rate === null ? -1 : a.rate - b.rate
-    );
+
+    return Object
+      .values(map)
+      .sort((a, b) =>
+        a.rate === null
+          ? 1
+          : b.rate === null
+          ? -1
+          : a.rate - b.rate
+      );
+
   }, [rows]);
 
-  const totals = useMemo(() => slabs.reduce(
-    (acc, r) => ({ taxable: acc.taxable + r.taxable, igst: acc.igst + r.igst, cgst: acc.cgst + r.cgst, sgst: acc.sgst + r.sgst }),
-    { taxable: 0, igst: 0, cgst: 0, sgst: 0 }
-  ), [slabs]);
+  const totals = useMemo(() =>
+    slabs.reduce(
+      (acc, r) => ({
 
-  const totalGST   = totals.igst + totals.cgst + totals.sgst;
-  const totalSales = totals.taxable + totalGST;
-  const slabColors = { 0: "gray", 5: "green", 12: "blue", 18: "purple", 28: "amber" };
+        taxable:
+          acc.taxable + r.taxable,
+
+        igst:
+          acc.igst + r.igst,
+
+        cgst:
+          acc.cgst + r.cgst,
+
+        sgst:
+          acc.sgst + r.sgst,
+
+      }),
+      {
+        taxable: 0,
+        igst: 0,
+        cgst: 0,
+        sgst: 0,
+      }
+    ),
+  [slabs]);
+
+  const totalGST =
+    totals.igst +
+    totals.cgst +
+    totals.sgst;
+
+  const totalSales =
+    totals.taxable + totalGST;
+
+  const slabColors = {
+    0: "gray",
+    5: "green",
+    12: "blue",
+    18: "purple",
+    28: "amber",
+  };
 
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="Total sales value"   value={`₹ ${fmt(totalSales)}`} />
-        <KpiCard label="Total taxable value" value={`₹ ${fmt(totals.taxable)}`} />
-        <KpiCard label="Total GST collected" value={`₹ ${fmt(totalGST)}`} accent />
-        <KpiCard label="Total invoices"      value={rows.length} />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4,1fr)",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+
+        <KpiCard
+          label="Total Sales Value"
+          value={`₹ ${fmt(totalSales)}`}
+        />
+
+        <KpiCard
+          label="Total Taxable Value"
+          value={`₹ ${fmt(totals.taxable)}`}
+        />
+
+        <KpiCard
+          label="Total GST Collected"
+          value={`₹ ${fmt(totalGST)}`}
+          accent
+        />
+
+        <KpiCard
+          label="Total Invoices"
+          value={rows.length}
+        />
+
       </div>
 
-      {/* Tax-wise breakdown */}
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
-        <div style={{ padding: "9px 16px", fontSize: "10.5px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.07em", background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-          Tax-wise sales breakup
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          overflow: "hidden",
+          marginBottom: 16,
+        }}
+      >
+
+        <div
+          style={{
+            padding: "9px 16px",
+            fontSize: "10.5px",
+            fontWeight: 700,
+            color: "#6b7280",
+            textTransform: "uppercase",
+            letterSpacing: "0.07em",
+            background: "#f9fafb",
+            borderBottom: "1px solid #e5e7eb",
+          }}
+        >
+          Tax-wise Sales Breakup
         </div>
+
         {slabs.length === 0 ? (
-          <div style={{ padding: "48px 0", textAlign: "center", color: "#9ca3af", fontSize: "13px" }}>No sales data for the selected period</div>
+
+          <div
+            style={{
+              padding: "48px 0",
+              textAlign: "center",
+              color: "#9ca3af",
+              fontSize: "13px",
+            }}
+          >
+            No sales data for the selected period
+          </div>
+
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: "12px",
+            }}
+          >
+
             <thead>
+
               <tr>
-                {["GST slab", "Taxable value", "Integrated tax (IGST)", "Central tax (CGST)", "State/UT tax (SGST)", "Total tax"].map((h) => (
-                  <th key={h} style={TH_STYLE}>{h}</th>
+
+                {[
+                  "GST Rate",
+                  "Taxable Value",
+                  "IGST",
+                  "CGST",
+                  "SGST",
+                  "Total GST",
+                ].map((h) => (
+
+                  <th
+                    key={h}
+                    style={TH_STYLE}
+                  >
+                    {h}
+                  </th>
+
                 ))}
+
               </tr>
+
             </thead>
+
             <tbody>
+
               {slabs.map((s, i) => {
-                const tax = s.igst + s.cgst + s.sgst;
-                const col = slabColors[s.rate] || "blue";
+
+                const tax =
+                  s.igst +
+                  s.cgst +
+                  s.sgst;
+
+                const col =
+                  slabColors[s.rate] || "blue";
+
                 return (
-                  <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                    <td style={TD_STYLE}><Badge color={col}>{s.rate !== null ? `${s.rate}%` : "—"}</Badge></td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.taxable)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.igst)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.cgst)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(s.sgst)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(tax)}</td>
+
+                  <tr
+                    key={i}
+                    style={{
+                      background:
+                        i % 2 === 0
+                          ? "#fff"
+                          : "#fafafa",
+                    }}
+                  >
+
+                    <td style={TD_STYLE}>
+                      <Badge color={col}>
+                        {s.rate !== null
+                          ? `${s.rate}%`
+                          : "—"}
+                      </Badge>
+                    </td>
+
+                    <td
+                      style={{
+                        ...TD_STYLE,
+                        textAlign: "right",
+                      }}
+                    >
+                      ₹ {fmt(s.taxable)}
+                    </td>
+
+                    <td
+                      style={{
+                        ...TD_STYLE,
+                        textAlign: "right",
+                      }}
+                    >
+                      ₹ {fmt(s.igst)}
+                    </td>
+
+                    <td
+                      style={{
+                        ...TD_STYLE,
+                        textAlign: "right",
+                      }}
+                    >
+                      ₹ {fmt(s.cgst)}
+                    </td>
+
+                    <td
+                      style={{
+                        ...TD_STYLE,
+                        textAlign: "right",
+                      }}
+                    >
+                      ₹ {fmt(s.sgst)}
+                    </td>
+
+                    <td
+                      style={{
+                        ...TD_STYLE,
+                        textAlign: "right",
+                        fontWeight: 700,
+                      }}
+                    >
+                      ₹ {fmt(tax)}
+                    </td>
+
                   </tr>
+
                 );
               })}
+
             </tbody>
+
             <tfoot>
+
               <tr>
-                <td style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Total</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.taxable)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.igst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.cgst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.sgst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#1d4ed8" }}>₹ {fmt(totalGST)}</td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "left",
+                    paddingLeft: 10,
+                  }}
+                >
+                  Total
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.taxable)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.igst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.cgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                  }}
+                >
+                  ₹ {fmt(totals.sgst)}
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    color: "#1d4ed8",
+                  }}
+                >
+                  ₹ {fmt(totalGST)}
+                </td>
+
               </tr>
+
             </tfoot>
+
           </table>
+
         )}
+
       </div>
+
     </>
   );
 }
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function GSTR1Reports() {
@@ -960,73 +2295,384 @@ export default function GSTR1Reports() {
     load();
   }, []);
 
-  const exportToExcel = () => {
-    const sourceData =
-      activeTab === "Credit Note / Sales Return"
-        ? filterByDate(salesReturns, selectedFilter, (r) => r.invoice_date || r.date)
-        : filterByDate(sales, selectedFilter, "invoice_date");
+ 
+const getExportData = () => {
 
-    if (!sourceData.length) return;
+  // SALES REPORT
+if (activeTab === "Sales Report") {
+  const rows = filterByDate(sales, selectedFilter, "invoice_date");
+  return rows.map((s) => {
+    const t = calcSalesTax(s);
+    return {
+      gstin: t.gstin || "-",
+      name: t.customerName,
+      invoice: s.invoice_no || "-",
+      date: fmtDate(s.invoice_date),
+      invoice_type: t.invoiceType,
+      place: t.placeOfSupply,
+      reverse_charge: t.reverseCharge,
+      rate: `${t.gstRate}%`,
+      hsn: t.hsn,
+      value: s.total_amount || 0,
+      taxable: t.taxable,
+      igst: t.igst,
+      cgst: t.cgst,
+      sgst: t.sgst,
+      total_tax: t.total,
+      ecom_gstin: t.ecomGstin,
+    };
+  });
+}
 
-    const excelData = sourceData.map((s) => {
+  // B2B
+  if (activeTab === "B2B") {
+    const rows = filterByDate(sales, selectedFilter, "invoice_date")
+     .filter((s) => s.invoice_category === "B2B");
+
+    return rows.map((s) => {
       const t = calcSalesTax(s);
+
       return {
-        GSTIN:             t.gstin || "—",
-        "Customer Name":   t.customerName,
-        "Invoice No":      activeTab === "Credit Note / Sales Return" ? (s.return_no || s.credit_note_no || "—") : (s.invoice_no || s.order_no || "—"),
-        "Invoice Date":    fmtDate(activeTab === "Credit Note / Sales Return" ? (s.invoice_date || s.date) : s.invoice_date),
-        "Place of Supply": t.placeOfSupply,
-        "Invoice Value":   s.total_amount,
-        "Taxable Value":   t.taxable,
-        "IGST":            parseFloat(t.igst.toFixed(2)),
-        "CGST":            parseFloat(t.cgst.toFixed(2)),
-        "SGST":            parseFloat(t.sgst.toFixed(2)),
-        "Total Tax":       parseFloat(t.total.toFixed(2)),
-        "B2B / B2C":       t.gstin.length === 15 ? "B2B" : "B2C",
+        gstin: t.gstin,
+        name: t.customerName,
+        invoice: s.invoice_no,
+        date: fmtDate(s.invoice_date),
+        value: s.total_amount,
+        taxable: t.taxable,
       };
     });
+  }
 
-    const ws  = XLSX.utils.json_to_sheet(excelData);
-    const wb  = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, activeTab.substring(0, 31));
-    const buf  = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([buf], { type: "application/octet-stream" });
-    saveAs(blob, `GSTR1_${activeTab.replace(/ /g, "_")}_${selectedFilter.replace(/ /g, "_")}.xlsx`);
+  // B2CL
+if (activeTab === "B2CL") {
+
+  const rows = filterByDate(
+    sales,
+    selectedFilter,
+    "invoice_date"
+  ).filter(
+    (s) => s.invoice_category === "B2CL"
+  );
+
+    return rows.map((s) => {
+      const t = calcSalesTax(s);
+      return {
+        invoice: s.invoice_no,
+        date: fmtDate(s.invoice_date),
+        value: s.total_amount,
+        place: t.placeOfSupply,
+        taxable: t.taxable,
+      };
+    });
+  }
+
+  // B2CS
+if (activeTab === "B2CS") {
+
+  const rows = filterByDate(
+    sales,
+    selectedFilter,
+    "invoice_date"
+  ).filter(
+    (s) => s.invoice_category === "B2CS"
+  );
+
+    return rows.map((s) => {
+      const t = calcSalesTax(s);
+      return {
+        place: t.placeOfSupply,
+        taxable: t.taxable,
+        igst: t.igst,
+        cgst: t.cgst,
+        sgst: t.sgst,
+      };
+    });
+  }
+
+  // CREDIT NOTE
+  if (activeTab === "Credit Note / Sales Return") {
+    const rows = filterByDate(salesReturns, selectedFilter, (r) => r.invoice_date || r.date);
+
+    return rows.map((s) => {
+      const t = calcSalesTax(s);
+
+      return {
+        gstin: t.gstin,
+        name: t.customerName,
+        note_no: s.return_no || s.credit_note_no,
+        date: fmtDate(s.invoice_date || s.date),
+        taxable: t.taxable,
+        total: t.total,
+      };
+    });
+  }
+
+  // HSN SUMMARY
+  if (activeTab === "HSN Summary") {
+    return sales.flatMap((s) =>
+      (s.details || []).map((item) => ({
+        hsn: item.hsn,
+        name: item.product_name,
+        qty: item.qty,
+        taxable: item.qty * item.price,
+      }))
+    );
+  }
+
+  // SALES SUMMARY
+// SALES SUMMARY
+if (activeTab === "Sales Summary") {
+
+  return sales.map((s) => {
+
+    const t = calcSalesTax(s);
+
+    return {
+      invoice: s.invoice_no,
+      date: fmtDate(s.invoice_date),
+      taxable: t.taxable,
+      igst: t.igst,
+      cgst: t.cgst,
+      sgst: t.sgst,
+      total: s.total_amount,
+    };
+
+  });
+}
+
+return [];
+};
+
+
+const getExportColumns = () => {
+  if (activeTab === "Sales Report") {
+    return [
+      { key: "gstin",          label: "GSTIN / UIN" },
+      { key: "name",           label: "Customer Name" },
+      { key: "invoice",        label: "Invoice No." },
+      { key: "date",           label: "Invoice Date" },
+      { key: "invoice_type",   label: "Invoice Type" },
+      { key: "place",          label: "Place of Supply" },
+      { key: "reverse_charge", label: "Rev. Charge" },
+      { key: "rate",           label: "Rate %" },
+      { key: "hsn",            label: "HSN / SAC" },
+      { key: "value",          label: "Invoice Value" },
+      { key: "taxable",        label: "Taxable Value" },
+      { key: "igst",           label: "IGST" },
+      { key: "cgst",           label: "CGST" },
+      { key: "sgst",           label: "SGST" },
+      { key: "total_tax",      label: "Total Tax" },
+    ];
+  }
+
+  if (activeTab === "B2B") {
+    return [
+      { key: "gstin",   label: "GSTIN/UIN of Recipient" },
+      { key: "name",    label: "Receiver Name" },
+      { key: "invoice", label: "Invoice No." },
+      { key: "date",    label: "Invoice Date" },
+      { key: "value",   label: "Invoice Value" },
+      { key: "taxable", label: "Taxable Value" },
+      { key: "igst",    label: "IGST" },
+      { key: "cgst",    label: "CGST" },
+      { key: "sgst",    label: "SGST" },
+    ];
+  }
+
+  if (activeTab === "B2CL") {
+    return [
+      { key: "invoice", label: "Invoice No." },
+      { key: "date",    label: "Invoice Date" },
+      { key: "place",   label: "Place of Supply" },
+      { key: "value",   label: "Invoice Value" },
+      { key: "taxable", label: "Taxable Value" },
+      { key: "igst",    label: "IGST" },
+    ];
+  }
+
+  if (activeTab === "B2CS") {
+    return [
+      { key: "place",   label: "Place of Supply" },
+      { key: "taxable", label: "Taxable Value" },
+      { key: "igst",    label: "IGST" },
+      { key: "cgst",    label: "CGST" },
+      { key: "sgst",    label: "SGST" },
+    ];
+  }
+
+  if (activeTab === "Credit Note / Sales Return") {
+    return [
+      { key: "gstin",   label: "GSTIN/UIN of Recipient" },
+      { key: "name",    label: "Receiver Name" },
+      { key: "note_no", label: "Note Number" },
+      { key: "date",    label: "Note Date" },
+      { key: "taxable", label: "Taxable Value" },
+      { key: "igst",    label: "IGST" },
+      { key: "cgst",    label: "CGST" },
+      { key: "sgst",    label: "SGST" },
+      { key: "total",   label: "Total Tax" },
+    ];
+  }
+
+  if (activeTab === "HSN Summary") {
+    return [
+      { key: "hsn",     label: "HSN Code" },
+      { key: "name",    label: "Description" },
+      { key: "qty",     label: "Total Qty" },
+      { key: "taxable", label: "Taxable Value" },
+    ];
+  }
+
+  if (activeTab === "Sales Summary") {
+    return [
+      { key: "invoice", label: "Invoice No" },
+      { key: "date",    label: "Date" },
+      { key: "taxable", label: "Taxable Value" },
+      { key: "igst",    label: "IGST" },
+      { key: "cgst",    label: "CGST" },
+      { key: "sgst",    label: "SGST" },
+      { key: "total",   label: "Invoice Value" },
+    ];
+  }
+
+  return [];
+};
+
+useEffect(() => {
+  window.exportGSTR1Excel = () =>
+    downloadExcel(getExportData(), activeTab);
+
+  window.exportGSTR1PDF = () =>
+downloadPDF(getExportData(), getExportColumns(), activeTab);
+  return () => {
+    delete window.exportGSTR1Excel;
+    delete window.exportGSTR1PDF;
   };
+}, [sales, salesReturns, selectedFilter, activeTab]);
+return (
+  <>
+    <style>
+      {`
+      .report-tab-tooltip:hover .report-tooltip-box {
+        opacity: 1 !important;
+        visibility: visible;
+        transform: translateX(-50%) translateY(-6px);
+      }
 
-  useEffect(() => { window.exportGSTR1Excel = exportToExcel; }, [sales, salesReturns, selectedFilter, activeTab]);
+      .report-tooltip-box {
+        visibility: hidden;
+      }
+      `}
+    </style>
 
-  return (
-    <div style={{ minHeight: "100vh", padding: "24px", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div
+  style={{
+    minHeight: "100vh",
+    padding: "24px",
+    fontFamily: "system-ui, -apple-system, sans-serif",
+    position: "relative",
+    overflow: "visible",
+    zIndex: 1,
+  }}
+>
 
       {/* Header row: tabs + date filter */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 12, flexWrap: "wrap" }}>
         <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 10, padding: 4, gap: 3, flexWrap: "wrap" }}>
-          {TABS.map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{
-                padding: "6px 14px", borderRadius: 7, fontSize: "12.5px", fontWeight: 500,
-                border: "none", cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-                background: activeTab === tab ? "#1e3a8a" : "transparent",
-                color: activeTab === tab ? "#fff" : "#6b7280",
-              }}>
-              {tab}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <DateFilter selected={selectedFilter} onChange={setSelectedFilter} />
-        </div>
-      </div>
+   {TABS.map((tab) => (
+  <div
+    key={tab}
+    style={{
+      position: "relative",
+      display: "inline-block",
+    }}
+    className="report-tab-tooltip"
+  >
+    <button
+      onClick={() => setActiveTab(tab)}
+      style={{
+        padding: "6px 14px",
+        borderRadius: 7,
+        fontSize: "12.5px",
+        fontWeight: 500,
+        border: "none",
+        cursor: "pointer",
+        transition: "all 0.15s",
+        whiteSpace: "nowrap",
+        background:
+          activeTab === tab
+            ? "#1e3a8a"
+            : "transparent",
 
-      <div style={{ fontSize: "11.5px", color: "#9ca3af", marginBottom: 16 }}>
-        {getDateRangeLabel(selectedFilter)}
-      </div>
+        color:
+          activeTab === tab
+            ? "#fff"
+            : "#6b7280",
+      }}
+    >
+      {tab}
+    </button>
 
-      {loading && (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af", fontSize: "13px" }}>Loading data…</div>
-      )}
+    {/* TOOLTIP */}
+<div
+  className="report-tooltip-box"
+  style={{
+    position: "absolute",
+    top: "48px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    width: "270px",
+    background: "#1f2937",
+    color: "#fff",
+    padding: "10px 12px",
+    borderRadius: "8px",
+    fontSize: "11px",
+    lineHeight: "1.5",
+    zIndex: 999999,
+    opacity: 0,
+    pointerEvents: "none",
+    transition: "0.2s",
+    boxShadow: "0 10px 25px rgba(0,0,0,0.2)",
+    whiteSpace: "normal",
+  }}
+>
+      {TAB_DESCRIPTIONS[tab]}
+    </div>
+  </div>
+))}
+</div>
 
+<div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+  <DateFilter
+    selected={selectedFilter}
+    onChange={setSelectedFilter}
+  />
+</div>
+
+</div>
+
+<div
+  style={{
+    fontSize: "11.5px",
+    color: "#9ca3af",
+    marginBottom: 16,
+  }}
+>
+  {getDateRangeLabel(selectedFilter)}
+</div>
+
+{loading && (
+  <div
+    style={{
+      textAlign: "center",
+      padding: "60px 0",
+      color: "#9ca3af",
+      fontSize: "13px",
+    }}
+  >
+    Loading data…
+  </div>
+)}
       {!loading && (
         <>
           {activeTab === "Sales Report"                && <SalesReportTab data={sales}        filter={selectedFilter} />}
@@ -1039,5 +2685,6 @@ export default function GSTR1Reports() {
         </>
       )}
     </div>
-  );
+  </>
+);
 }

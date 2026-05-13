@@ -6,6 +6,9 @@ import {
 } from "react-icons/fi";
 import { LuPackage, LuBoxes } from "react-icons/lu";
 import Table from "../../components/Table";
+import { downloadExcel, downloadPDF } from "../../utils/exportUtils";
+
+
 
 const fmt = (n) =>
   n === 0 ? "₹0" : "₹" + Number(n).toLocaleString("en-IN");
@@ -65,12 +68,46 @@ const res = await axios.get(
   };
 
   const filteredItems = items.filter(
+
+    
     (item) =>
       searchCategory === "" ||
       item.category.toLowerCase().includes(searchCategory.toLowerCase()) ||
       item.name.toLowerCase().includes(searchCategory.toLowerCase())
   );
 
+
+
+
+const exportData = filteredItems.map((item, i) => ({
+  sr: i + 1,
+  name: item.name,
+  hsn: item.hsn,
+  purchasePrice: item.purchasePrice,
+  sellingPrice: item.sellingPrice,
+  stockQuantity: item.stockQuantity,
+  stockValue: item.stockQuantity * item.purchasePrice,
+}));
+
+const exportColumns = [
+  { key: "sr", label: "Sr No" },
+  { key: "name", label: "Item Name" },
+  { key: "hsn", label: "HSN" },
+  { key: "purchasePrice", label: "Purchase Price" },
+  { key: "sellingPrice", label: "Selling Price" },
+  { key: "stockQuantity", label: "Qty" },
+  { key: "stockValue", label: "Value" },
+];
+
+
+
+useEffect(() => {
+  window.exportStockExcel = () =>
+    downloadExcel(exportData, "StockSummary");
+
+  window.exportStockPDF = () =>
+    downloadPDF(exportData, exportColumns, "StockSummary");
+}, [exportData, exportColumns]);
   const totalStockValue = filteredItems.reduce(
     (sum, item) => sum + item.stockQuantity * item.purchasePrice, 0
   );

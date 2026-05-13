@@ -10,35 +10,50 @@ import {
   HiOutlineUser,
   HiOutlineClipboardList,
 } from "react-icons/hi";
+import { FiPlus } from "react-icons/fi";
+
 
 import { HiOutlineBuildingOffice } from "react-icons/hi2";
+
+/* ─── Subscription config ───────────────────────────────────────
+   Replace SUBSCRIPTION_EXPIRY with the real value from your
+   auth / subscription context.
+──────────────────────────────────────────────────────────────── */
+const SUBSCRIPTION_EXPIRY = new Date(Date.now() + 176 * 24 * 60 * 60 * 1000);
+const getDaysLeft = () =>
+  Math.max(0, Math.ceil((SUBSCRIPTION_EXPIRY - Date.now()) / (1000 * 60 * 60 * 24)));
 
 /* Sidebar Navigation */
 
 const navItems = [
   { label: "Home", icon: HiOutlineHome, path: "/dashboard" },
 
-  {
-    label: "Sales",
-    icon: HiOutlineDocumentText,
-    children: [
-      { label: "Sales Invoices", path: "/sales-invoice-list" },
-      { label: "Add Sale", path: "/sales-invoice" },
-      { label: "Sales Return", path: "/sales-return" },
-      { label: "Credit Note", path: "/credit-note" },
-    ],
-  },
+{
+  label: "Sales",
 
-  {
-    label: "Purchase",
-    icon: HiOutlineDocumentText,
-    children: [
-      { label: "Purchase Invoices", path: "/purchase-invoice-list" },
-      { label: "Add Purchase", path: "/purchase-invoice" },
-      { label: "Purchase Return", path: "/purchase-return-list" },
-      { label: "Debit Note", path: "/debit-note" },
-    ],
-  },
+  icon: HiOutlineDocumentText,
+  children: [
+    { label: "Sales Invoices", path: "/sales-invoice-list" },
+    { label: "Add Sale", path: "/sales-invoice" },
+    { label: "Sales Return", path: "/sales-return" },
+    { label: "Credit Note", path: "/credit-note" },
+
+  
+  ],
+},
+
+{
+  label: "Purchase",
+  icon: HiOutlineDocumentText,
+  children: [
+    { label: "Purchase Invoices", path: "/purchase-invoice-list" },
+    { label: "Add Purchase", path: "/purchase-invoice" },
+    { label: "Purchase Return", path: "/purchase-return-list" },
+    { label: "Debit Note", path: "/debit-note" },
+
+
+  ],
+},
 
   {
     label: "Items",
@@ -65,19 +80,22 @@ const navItems = [
   },
 
   {
-    label: "Reports",
-    icon: HiOutlineDocumentText,
-    children: [
-      {
-        label: "Sales Reports",
-        path: "/reports/sales",
-      },
-      {
-        label: "Purchase Reports",
-        path: "/reports",
-      },
-    ],
-  },
+  label: "Reports",
+  icon: HiOutlineDocumentText,
+  children: [
+    {
+      label: "Sales Reports",
+      path: "/reports/gstr1-sales",
+    },
+
+    {
+      label: "Purchase Reports",
+      path: "/reports/gstr2-purchase",
+    },
+  ],
+},
+
+ 
 ];
 
 const MainLayout = () => {
@@ -87,33 +105,7 @@ const MainLayout = () => {
   const [openMenu, setOpenMenu] = useState(null);
   const [openSubMenu, setOpenSubMenu] = useState(null);
 
-
-  // 🔥 ADD HERE
-const downloadCSV = () => {
-  const table = document.querySelector("table");
-  if (!table) return alert("No data to export");
-
-  let csv = [];
-  for (let row of table.rows) {
-    let cols = Array.from(row.cells).map(cell => cell.innerText);
-    csv.push(cols.join(","));
-  }
-
-  const blob = new Blob([csv.join("\n")], { type: "text/csv" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "stock-summary.csv";
-  link.click();
-};
-
-const handlePrint = () => {
-  window.print();
-};
-
-const handleEmail = () => {
-  window.location.href =
-    "mailto:?subject=Stock Report&body=Please find attached stock report.";
-};
+  const daysLeft = getDaysLeft();
 
   const isRouteActive = (path) => {
     return (
@@ -172,14 +164,77 @@ const handleEmail = () => {
       title: "Items",
       subtitle: "Manage your product inventory.",
     },
-    "/customer-list": {
-      title: "Customers",
-      subtitle: "Manage your customers.",
-    },
-    "/vendor-list": {
-      title: "Vendors",
-      subtitle: "Manage your vendors.",
-    },
+"/customer-list": {
+  title: "Customers",
+  subtitle: "Manage your customers.",
+  actions: (
+    <div className="flex gap-3">
+
+      {/* Download Excel */}
+      <button
+        onClick={() => window.downloadCustomers?.()}
+        className="top-btn"
+      >
+        <HiOutlineDownload size={16} />
+        Download Excel
+      </button>
+
+   <button
+  onClick={() => window.downloadCustomersPDF?.()}
+  className="top-btn"
+>
+  <HiOutlinePrinter size={16} />
+  Download PDF
+</button>
+
+   {/* Add Customer */}
+      <button
+        onClick={() => window.addCustomer?.()}
+        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[#1e3a8a] text-white hover:bg-[#172f6b] transition"
+      >
+        <FiPlus size={16} />
+        Add Customer
+      </button>
+
+    </div>
+  ),
+},
+   "/vendor-list": {
+  title: "Vendors",
+  subtitle: "Manage your vendors.",
+  actions: (
+    <div className="flex gap-3">
+
+      {/* Download Excel */}
+      <button
+        onClick={() => window.downloadVendors?.()}
+        className="top-btn"
+      >
+        <HiOutlineDownload size={16} />
+        Download Excel
+      </button>
+
+      {/* Download PDF */}
+      <button
+        onClick={() => window.downloadVendorsPDF?.()}
+        className="top-btn"
+      >
+        <HiOutlinePrinter size={16} />
+        Download PDF
+      </button>
+
+      {/* Add Vendor */}
+      <button
+        onClick={() => window.addVendor?.()}
+        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[#1e3a8a] text-white hover:bg-[#172f6b] transition"
+      >
+        <FiPlus size={16} />
+        Add Vendor
+      </button>
+
+    </div>
+  ),
+},
     "/reports": {
       title: "Reports",
       subtitle: "View business reports and analytics.",
@@ -194,18 +249,19 @@ const handleEmail = () => {
       subtitle: "View GST purchase report details.",
       actions: (
         <div className="flex gap-3">
-          <button className="top-btn">
-            <HiOutlineMail size={16} /> Email Excel
-          </button>
+        
           <button
             onClick={() => window.exportGSTR2Excel?.()}
             className="top-btn"
           >
             <HiOutlineDownload size={16} /> Download Excel
           </button>
-          <button className="top-btn">
-            <HiOutlinePrinter size={16} /> Print PDF
-          </button>
+        <button
+ onClick={() => window.exportGSTR2PDF?.()} 
+  className="top-btn"
+>
+  <HiOutlinePrinter size={16} /> Download PDF
+</button>
         </div>
       ),
     },
@@ -422,73 +478,78 @@ const handleEmail = () => {
           {/* Right Side */}
           <div className="flex items-center gap-3">
 
-  {/* ✅ STOCK SUMMARY PAGE */}
-  {location.pathname === "/stock-summary" ? (
-    <div className="flex gap-3">
-     <button onClick={handleEmail} className="top-btn">
-  <HiOutlineMail size={16} /> Email Excel
-</button>
+            {/* ✅ STOCK SUMMARY PAGE */}
+            {location.pathname === "/stock-summary" ? (
+              <div className="flex gap-3">
+                <button onClick={() => window.exportStockExcel?.()} className="top-btn">
+                  <HiOutlineDownload size={16} /> Download Excel
+                </button>
+                <button onClick={() => window.exportStockPDF?.()} className="top-btn">
+                  <HiOutlinePrinter size={16} /> Download PDF
+                </button>
+              </div>
 
-<button onClick={downloadCSV} className="top-btn">
-  <HiOutlineDownload size={16} /> Download Excel
-</button>
+            /* ✅ ITEMS PAGE */
+            ) : location.pathname === "/item-list" ? (
+              <button
+                onClick={() => navigate("/stock-summary")}
+                className="flex items-center justify-between gap-4 px-4 py-2.5 rounded-xl border border-indigo-200 bg-white shadow-sm hover:shadow-md transition min-w-[180px]"
+              >
+                <div className="flex flex-col text-left">
+                  <div className="flex items-center gap-1 text-xs font-medium text-indigo-500">
+                    ↑ Stock Value
+                  </div>
+                  <p className="text-base font-bold text-gray-900">₹ 0</p>
+                </div>
+                <span className="text-indigo-400 text-sm">↗</span>
+              </button>
 
-<button onClick={handlePrint} className="top-btn">
-  <HiOutlinePrinter size={16} /> Print PDF
-</button>
-    </div>
+            /* ✅ PAGES WITH CUSTOM ACTIONS */
+            ) : currentPage?.actions ? (
+              currentPage.actions
 
-  /* ✅ ITEMS PAGE */
-  ) : location.pathname === "/item-list" ? (
-    <button
-      onClick={() => navigate("/stock-summary")}
-      className="flex items-center justify-between gap-4 px-4 py-2.5 rounded-xl border border-indigo-200 bg-white shadow-sm hover:shadow-md transition min-w-[180px]"
-    >
-      <div className="flex flex-col text-left">
-        <div className="flex items-center gap-1 text-xs font-medium text-indigo-500">
-          ↑ Stock Value
-        </div>
-        <p className="text-base font-bold text-gray-900">
-          ₹ 0
-        </p>
-      </div>
-      <span className="text-indigo-400 text-sm">↗</span>
-    </button>
+            /* ✅ DEFAULT — days left + verified badge + small avatar */
+            ) : (
+         <div className="flex items-center gap-3">
 
-  /* ✅ ALL OTHER PAGES (DEFAULT AVATAR) */
-  ) : currentPage?.actions ? (
-    currentPage.actions
-  ) : (
-    <div
-      onClick={() => navigate("/profile")}
-      className="flex items-center gap-3 cursor-pointer group"
-    >
-      <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm bg-[#1e3a8a]">
-        {user?.email?.charAt(0)?.toUpperCase() || "U"}
-      </div>
+  {/* 🔹 Subscription Info (CLICKABLE) */}
+  <div
+    onClick={() => navigate("/subscription")}
+    className="flex items-center gap-2 cursor-pointer group"
+  >
+    <span className="text-xs text-gray-400 font-medium">
+      {daysLeft} days left
+    </span>
 
-      <div className="flex flex-col">
-        <p className="text-sm font-semibold text-gray-800 leading-tight">
-          {user?.email?.split("@")[0] || "User"}
-        </p>
-        <p className="text-xs text-gray-400">
-          {user?.email || "user@email.com"}
-        </p>
-      </div>
+    <svg viewBox="0 0 20 20" width="16" height="16">
+      <circle cx="10" cy="10" r="10" fill="#2563EB" />
+      <path d="M6 10.5l3 3 5-6" stroke="white" strokeWidth="1.8"/>
+    </svg>
+  </div>
 
-      <ChevronDown
-        size={16}
-        className="text-gray-400 group-hover:text-gray-600 transition"
-      />
-    </div>
-  )}
+  {/* 🔹 Avatar (PROFILE ONLY) */}
+  <div
+    onClick={() => navigate("/profile")}
+    className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-[#1e3a8a] cursor-pointer"
+  >
+    {user?.email?.charAt(0)?.toUpperCase() || "U"}
+  </div>
 
 </div>
+            )}
+
+          </div>
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto px-8 py-6">
-          <Outlet />
+<main
+  className="flex-1 overflow-y-auto px-8 py-6"
+  style={{
+    overflowX: "visible",
+    position: "relative",
+    zIndex: 1,
+  }}
+>          <Outlet />
         </main>
       </div>
     </div>

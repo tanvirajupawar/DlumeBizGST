@@ -224,7 +224,12 @@ const payload = {
           </div>
         )}
 
-        <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
+        <div style={{
+  overflowY: "auto",
+  overflowX: "hidden", // 🔥 ADD THIS
+  flex: 1,
+  minHeight: 0
+}}>
           <table style={{ width: "100%", borderCollapse: "collapse",  tableLayout: "auto" }}>
             <thead style={{ position: "sticky", top: 0, zIndex: 1 }}>
               <tr style={{ background: "#fff", borderBottom: "2px solid #e5e7eb" }}>

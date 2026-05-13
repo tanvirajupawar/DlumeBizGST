@@ -47,8 +47,7 @@ const result = await Promise.all(
 
     return {
       ...c,
-      pending_amount: outstanding
-    };
+pending_amount: (c.opening_balance || 0) + outstanding    };
   })
 );
 
@@ -179,7 +178,7 @@ const data = {
       clientObj.totalAmount = totalAmount;
       clientObj.paidAmount = paidAmount;
       clientObj.outstandingAmount = outstandingAmount;
-      clientObj.pending_amount = outstandingAmount;
+      clientObj.pending_amount = (client.opening_balance || 0) + outstandingAmount;
 
       return res.json({
         success: true,

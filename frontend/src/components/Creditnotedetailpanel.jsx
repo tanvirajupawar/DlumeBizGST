@@ -133,7 +133,7 @@ const CreditNoteDetailPanel = ({ note, onClose }) => {
 
   const d = new Date(note.date);
 
-  if (isNaN(d)) return note.date; // already formatted
+  if (isNaN(d)) return note.date; 
 
   return d.toLocaleDateString("en-GB").replace(/\//g, "-");
 })()}

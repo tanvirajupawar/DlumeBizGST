@@ -11,10 +11,10 @@ const stockSchema = new Schema({
     type: String,
     default: "",
   },
-  stock: {
-    type: String,
-    default: "",
-  },
+stock: {
+  type: Number,
+  default: 0,
+},
 
   createdOn: {
     type: Date,

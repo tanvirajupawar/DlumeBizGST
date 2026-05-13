@@ -65,20 +65,35 @@ for (let inv of invoices) {
 
   const pay = Math.min(balance, remaining);
 
-  inv.paid_amount = alreadyPaid + pay;
+inv.paid_amount = alreadyPaid + pay;
 
-  // ✅ CRITICAL FIX
-  inv.balance_amount = totalAmt - inv.paid_amount;
+// ✅ BALANCE
+inv.balance_amount = totalAmt - inv.paid_amount;
 
-  inv.payment_status =
-    inv.paid_amount >= totalAmt ? "Paid" : "Partial";
+// ✅ STATUS
+if (inv.paid_amount >= totalAmt) {
 
-  remaining -= pay;
+  inv.payment_status = "Paid";
+  inv.status = "Paid";
 
-  await inv.save();
+} else if (inv.paid_amount > 0) {
+
+  inv.payment_status = "Partial Paid";
+  inv.status = "Partial Paid";
+
+} else {
+
+  inv.payment_status = "Unpaid";
+  inv.status = "Unpaid";
 }
 
-    // 🔥 UPDATE CUSTOMER PENDING
+remaining -= pay;
+
+await inv.save();
+
+}
+
+// 🔥 UPDATE CUSTOMER PENDING
     const totalPending = await SaleOrder.aggregate([
       { $match: { client_id: new mongoose.Types.ObjectId(customer_id) } },
       {

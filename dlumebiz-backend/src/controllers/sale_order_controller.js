@@ -26,112 +26,247 @@ const printer = new PdfPrinter(fonts);
 
 
 const saleOrderControler = {
-    create: async function (req, res) {
-        try {
-            const data = req.body;
-            const details = data.details;
-            const order = new SaleOrderModel(data);
-            if (order.advance_amount > 0) {
-                order.paid_amount = order.advance_amount;
-                if (order.advance_amount >= order.total_amount) {
-                    order.status = "Paid";
-                } else {
-                    order.status = "Partial Paid";
-                }
-                } else {
-                order.status = "Unpaid";
-            }
-            console.log(order.shipment_date);
-            await order.save();
-          
 
-            if (Array.isArray(details) && details.length > 0) {
-                let detailDocs = await SaleDetail.insertMany(
-                    details.map(d => ({
-                        ...d,
-                        sales_order_id: order._id,
-                    }))
-                );
+  // ✅ GENERATE INVOICE (USED BY FRONTEND)
+generateInvoice: async function (req, res) {
+  try {
+    // Only look at orders that actually have a valid I-XXXXX invoice number
+    const lastOrder = await SaleOrderModel.findOne({
+      invoice_no: { $regex: /^I-\d+$/ }
+    }).sort({ _id: -1 });
 
-                for (let d of detailDocs) {
-                    let stock = await StockManagementModel.findOne({
-                    product_id: d.product_id,
-                    company_id: order.company_id
-                    });
-                    const previousStock = stock ? stock.total_stock : 0;
-                    const qty = parseInt(d.qty);
-        
-                    if (stock) {
-                    stock.out += qty; 
-                    stock.total_stock -= qty; 
-                    await stock.save();
-                    } else {
-                    await StockManagementModel.create({
-                        product_id: d.product_id,
-                        company_id: order.company_id,
-                        in: qty,
-                        total_stock: parseInt(previousStock) - qty,
-                    });
-                    }
-                }
-            }
+    let nextNumber = 1;
 
-            const invoice = await SaleOrderModel.findById(order._id).populate({
-                                                        path: 'company_id',
-                                                    })
-                                                    .populate({
-                                                        path: 'client_id',
-                                                    })
-                                                    .populate({
-                                                        path: 'details',
-                                                        populate: [
-                                                            {path: 'product_id'},
-                                                        ],
-                                                    });
+    if (lastOrder && lastOrder.invoice_no) {
+      const parts = lastOrder.invoice_no.split("-");
+      const lastNo = parseInt(parts[1]);
+      if (!isNaN(lastNo)) {
+        nextNumber = lastNo + 1;
+      }
+    }
 
-            return res.json({ success: true, data:invoice, message: "Sale Order Created Successfully"});  
-            
-        } catch (error) {
-             return res.status(500).json({
-                success: false,
-                message: "Server Error",
-                error: error.message || error
-            });
-            
+    const invoiceNo = `I-${String(nextNumber).padStart(5, "0")}`;
+
+    return res.json({
+      success: true,
+      invoice_no: invoiceNo
+    });
+
+  } catch (error) {
+    console.error("generateInvoice ERROR:", error.message); // ← check terminal for exact cause
+    return res.status(500).json({
+      success: false,
+      message: "Error generating invoice number",
+      error: error.message
+    });
+  }
+},
+
+  // ✅ CREATE SALE ORDER
+  create: async function (req, res) {
+    try {
+      const data = req.body;
+      const details = data.details;
+
+      // ✅ USE INVOICE FROM FRONTEND (DO NOT GENERATE AGAIN)
+      if (!data.invoice_no) {
+        return res.status(400).json({
+          success: false,
+          message: "Invoice number is required"
+        });
+      }
+
+      const order = new SaleOrderModel(data);
+
+      // ✅ PAYMENT STATUS LOGIC
+      if (order.advance_amount > 0) {
+        order.paid_amount = order.advance_amount;
+
+        if (order.advance_amount >= order.total_amount) {
+          order.status = "Paid";
+        } else {
+          order.status = "Partial Paid";
         }
-        
-    },
+      } else {
+        order.status = "Unpaid";
+      }
+
+      await order.save();
+
+      // ✅ SAVE DETAILS + STOCK UPDATE
+      if (Array.isArray(details) && details.length > 0) {
+        let detailDocs = await SaleDetail.insertMany(
+          details.map(d => ({
+            ...d,
+            sales_order_id: order._id,
+          }))
+        );
+
+        for (let d of detailDocs) {
+          let stock = await StockManagementModel.findOne({
+            product_id: d.product_id,
+            company_id: order.company_id
+          });
+
+          const previousStock = stock ? stock.total_stock : 0;
+          const qty = parseInt(d.qty);
+
+  if (stock) {
+
+  stock.out += qty;
+  stock.total_stock -= qty;
+
+  await stock.save();
+
+} else {
+
+  await StockManagementModel.create({
+    product_id: d.product_id,
+    company_id: order.company_id,
+    in: 0,
+    out: qty,
+    total_stock: Math.max(0, previousStock - qty),
+  });
+}
+
+// ✅ PRODUCT UPDATE
+const product = await productModel.findById(d.product_id);
+
+if (product) {
+
+  product.qty = Math.max(
+    0,
+    (product.qty || 0) - qty
+  );
+
+  product.stock_out =
+    (product.stock_out || 0) + qty;
+
+  product.total = product.qty;
+
+  await product.save();
+}
+        }
+      }
+
+      // ✅ FETCH FULL INVOICE
+      const invoice = await SaleOrderModel.findById(order._id)
+        .populate({ path: 'company_id' })
+        .populate({ path: 'client_id' })
+        .populate({
+          path: 'details',
+          populate: [{ path: 'product_id' }],
+        });
+
+      return res.json({
+        success: true,
+        data: invoice,
+        message: "Sale Order Created Successfully"
+      });
+
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: "Server Error",
+        error: error.message || error
+      });
+    }
+  },
+
 
 fetch: async function (req, res) {
   try {
+
     const { client_id } = req.query;
 
     let filter = {};
 
-    if (client_id) {
-      filter.client_id = new mongoose.Types.ObjectId(client_id); // ✅ FIX
+    if (
+      client_id &&
+      mongoose.Types.ObjectId.isValid(client_id)
+    ) {
+      filter.client_id =
+        new mongoose.Types.ObjectId(client_id);
     }
 
     console.log("FILTER:", filter);
 
-const orders = await SaleOrderModel.find(filter)
-  .populate({
-    path: "client_id",
-    select: "first_name last_name company_name gst state"
-  })
-  .populate("details")
-  .sort({ createdOn: -1 });
+    const orders = await SaleOrderModel.find(filter)
+
+      // ✅ CUSTOMER DETAILS
+      .populate({
+        path: "client_id",
+
+        select: `
+          first_name
+          last_name
+          company_name
+          gstin
+          phone
+          email
+          address
+          city
+          state
+          pincode
+        `
+      })
+
+      // ✅ ITEMS DETAILS
+      .populate({
+        path: "details",
+
+        select: `
+          product_name
+          hsn
+          qty
+          price
+          gst
+          amount
+          unit
+        `
+      })
+
+      .sort({ createdOn: -1 })
+
+      .lean();
+
+    // ✅ FORMAT DATE/TIME
+    const formatted = orders.map((o) => {
+
+      const invoiceDate = o.invoice_date
+        ? new Date(o.invoice_date)
+        : null;
+
+      return {
+
+        ...o,
+
+        invoice_date_formatted: invoiceDate
+          ? invoiceDate.toLocaleDateString("en-GB")
+          : "",
+
+        invoice_time_formatted: invoiceDate
+          ? invoiceDate.toLocaleTimeString("en-IN", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "",
+      };
+    });
 
     return res.json({
       success: true,
-      data: orders
+      data: formatted
     });
 
   } catch (error) {
+
     console.error("FETCH ERROR:", error);
+
     return res.status(500).json({
       success: false,
-      message: "Server Error"
+      message: "Server Error",
+      error: error.message
     });
   }
 },
@@ -279,6 +414,23 @@ const orders = await SaleOrderModel.find(filter)
 
                         await stock.save();
                     }
+
+                    const product = await productModel.findById(d.product_id);
+
+if (product) {
+
+  product.qty =
+    (product.qty || 0) + qty;
+
+  product.stock_out = Math.max(
+    0,
+    (product.stock_out || 0) - qty
+  );
+
+  product.total = product.qty;
+
+  await product.save();
+}
                 }
                 await SaleDetail.deleteMany({ sales_order_id: id });
             }
@@ -348,6 +500,23 @@ const orders = await SaleOrderModel.find(filter)
 
                     await stock.save();
                 }
+
+                const product = await productModel.findById(d.product_id);
+
+if (product) {
+
+  product.qty =
+    (product.qty || 0) + qty;
+
+  product.stock_out = Math.max(
+    0,
+    (product.stock_out || 0) - qty
+  );
+
+  product.total = product.qty;
+
+  await product.save();
+}
             }
             await SaleDetail.deleteMany({ sales_order_id: id });
             if (Array.isArray(details) && details.length > 0) {
@@ -370,13 +539,55 @@ const orders = await SaleOrderModel.find(filter)
                     stock.out += qty; 
                     stock.total_stock -= qty; 
                     await stock.save();
-                    } else {
+                    } 
+                    
+                    
+                    const product = await productModel.findById(d.product_id);
+
+if (product) {
+
+  product.qty = Math.max(
+    0,
+    (product.qty || 0) - qty
+  );
+
+  product.stock_out =
+    (product.stock_out || 0) + qty;
+
+  product.total = product.qty;
+
+  await product.save();
+}
+                    else {
                     await StockManagementModel.create({
                         product_id: d.product_id,
                         company_id: updetedOrder.company_id,
                         out: qty,
                         total_stock: parseInt(previousStock) - qty,
-                    });
+                    });await StockManagementModel.create({
+  product_id: d.product_id,
+  company_id: updetedOrder.company_id,
+  in: 0,
+  out: qty,
+  total_stock: Math.max(0, previousStock - qty),
+});
+
+const product = await productModel.findById(d.product_id);
+
+if (product) {
+
+  product.qty = Math.max(
+    0,
+    (product.qty || 0) - qty
+  );
+
+  product.stock_out =
+    (product.stock_out || 0) + qty;
+
+  product.total = product.qty;
+
+  await product.save();
+}
                     }
                 }
             }
@@ -391,44 +602,6 @@ const orders = await SaleOrderModel.find(filter)
         }
     },
 
-    //  payment: async function (req, res) {
-    //     try {
-    //         const data = req.body;
-    //         console.log(data);            
-            
-    //         const payment = new SaleReceipt(data);
-    //         await payment.save();   
-            
-    //         const order = await SaleOrderModel.findById(payment.sale_order_id);
-
-    //         if (order) {
-    //             order.paid_amount = (order.paid_amount || 0) + Number(payment.amount);
-
-    //             if (order.paid_amount >= order.total_amount) {
-    //                 order.status = "Paid";
-    //             } else if (order.paid_amount > 0) {
-    //                 order.status = "Partial Paid";
-    //             } else {
-    //                 order.status = "Unpaid";
-    //             }
-
-    //             await order.save();
-    //         }
-
-    //         return res.json({ success: true, data:payment, message: "Payment Done Successfully"});  
-            
-    //     } catch (error) {
-    //         console.log(error);
-
-    //             return res.status(500).json({
-    //             success: false,
-    //             message: "Server Error",
-    //             error: error.message || error
-    //         });
-            
-    //     }
-        
-    // },
 
     payments: async function (req, res) {
         try {

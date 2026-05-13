@@ -26,6 +26,26 @@ contact_no: { type: String, default: "" },
 due_date: { type: Date }, 
   invoice_no: { type: String, default: "" },
   invoice_type: { type: String, default: "" },
+  invoice_category: {
+  type: String,
+  enum: ["B2B", "B2CL", "B2CS"],
+  default: "B2CS",
+},
+
+gstin: {
+  type: String,
+  default: "",
+},
+
+place_of_supply: {
+  type: String,
+  default: "",
+},
+
+state_code: {
+  type: String,
+  default: "",
+},
   status: {
     type: String,
     enum: ["pending", "in_progress", "completed", 'Paid', 'Unpaid', 'Partial Paid'],

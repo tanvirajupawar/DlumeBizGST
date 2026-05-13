@@ -195,29 +195,72 @@ const PurchaseInvoiceList = () => {
   // ↓ NEW
 const handlePayment = async (data) => {
   try {
-await axios.post("http://localhost:8000/api/payment-out", {
-  vendor_id: data.vendor_id,
-  amount: Number(data.amount),
-  payment_mode: data.paymentMode,
-  remark: data.note || "",
 
-  // 🔥 VERY IMPORTANT
-  invoice_ids: [data.invoiceId],
-});
-    // refresh both
-    fetchInvoices();
-    fetchPayments();
+    const payload = {
 
-    window.dispatchEvent(new Event("paymentUpdated"));
+      // ✅ FIXED
+      vendor_id:
+        data.vendor_id?._id ||
+        data.vendor_id,
+
+      amount: Number(data.amount || 0),
+
+      payment_mode:
+        data.paymentMode || "Cash",
+
+      remark: data.note || "",
+
+      invoice_ids: [data.invoiceId],
+    };
+
+    console.log("PAYMENT PAYLOAD:", payload);
+
+    const res = await axios.post(
+      "http://localhost:8000/api/payment-out",
+      payload
+    );
+
+    console.log("PAYMENT RESPONSE:", res.data);
+
+    if (res.data.success) {
+
+      // refresh
+      await fetchInvoices();
+      await fetchPayments();
+
+      window.dispatchEvent(
+        new Event("paymentUpdated")
+      );
+
+      alert("Payment recorded successfully");
+
+    } else {
+
+      alert(
+        res.data.message ||
+        "Failed to record payment"
+      );
+    }
 
   } catch (err) {
-    console.error(err);
-    alert("Failed to record payment");
+
+    console.error("PAYMENT ERROR:", err);
+
+    console.log(
+      "SERVER ERROR:",
+      err?.response?.data
+    );
+
+    alert(
+      err?.response?.data?.message ||
+      "Failed to record payment"
+    );
+
   } finally {
+
     setPaymentTarget(null);
   }
 };
-
   const filteredInvoices = invoices.filter(inv =>
     (inv.vendor || "").toLowerCase().includes(search.toLowerCase()) ||
     (inv.invoiceNo || "").toLowerCase().includes(search.toLowerCase())
@@ -245,7 +288,7 @@ useEffect(() => {
         const formatted = res.data.data.map((p) => ({
           id: p._id,
           invoiceNo: p.supplier_invoice_no,
-vendor_id: p.vendor_id?._id,
+vendor_id: p.vendor_id,
 vendor: p.vendor_id?.vendor_name || "Vendor",
 companyName: p.vendor_id?.company_name || "-",
           date: new Date(p.invoice_date).toLocaleDateString("en-GB"),
@@ -487,43 +530,45 @@ companyName: p.vendor_id?.company_name || "-",
           onClose={() => setPurchaseReturnTarget(null)}
 onConfirm={async (data) => {
   try {
-
-    console.log("CONFIRM DATA:", data); // ✅ DEBUG
-
+    console.log("CONFIRM DATA:", data);
+ 
     const safeItems = data?.items || [];
-
+ 
     const payload = {
       purchase_id: purchaseReturnTarget.id,
       vendor_id: purchaseReturnTarget.vendor_id,
-
       date: data?.date,
-
-    details: safeItems.map(it => ({
-  product_name: it.item, // OK if modal uses 'item'
-  qty: it.returnQty,
-  price: it.price,
-  amount: it.returnQty * it.price
-})),
-
+      details: safeItems.map(it => ({
+        product_name: it.item,
+        qty: it.returnQty,
+        price: it.price,
+        amount: it.returnQty * it.price
+      })),
       total_amount: data?.total || 0,
       reason: data?.reason || ""
     };
-
+ 
     console.log("RETURN PAYLOAD:", payload);
-
+ 
     const res = await axios.post(
       "http://localhost:8000/api/purchase-return",
       payload
     );
-
+ 
     if (res.data.success) {
+      // ✅ Notify InvoiceDetailPanel (and anything else listening)
+      window.dispatchEvent(
+        new CustomEvent("purchaseReturnCreated", {
+          detail: { purchase_id: purchaseReturnTarget.id }
+        })
+      );
+ 
       alert("Purchase Return Created Successfully");
       setPurchaseReturnTarget(null);
-      fetchInvoices();
+      fetchInvoices();   // refresh the list
     } else {
       alert(res.data.message || "Error creating return");
     }
-
   } catch (err) {
     console.error("RETURN ERROR:", err);
     alert("Server Error");
@@ -536,47 +581,51 @@ onConfirm={async (data) => {
         <DebitNoteModal
           invoice={debitNoteTarget}
           onClose={() => setDebitNoteTarget(null)}
-      onConfirm={async (data) => {
+   onConfirm={async (data) => {
   try {
     console.log("DEBIT DATA:", data);
-
-   const payload = {
-  purchase_id: debitNoteTarget.id,
-  vendor_id: debitNoteTarget.vendor_id,
-
-  // ✅ ADD THIS (MAIN FIX)
-  details: data.items.map(i => ({
-    product_id: i.product_id || null,
-    product_name: i.item,
-    qty: i.qty,
-    price: i.newPrice,
-    amount: i.qty * i.newPrice
-  })),
-
-  amount: Number(data.debitTotal),
-  reason: data.reason || "",
-  date: new Date().toISOString()
-};
-
+ 
+    const payload = {
+      purchase_id: debitNoteTarget.id,
+      vendor_id: debitNoteTarget.vendor_id,
+      details: data.items.map(i => ({
+        product_id: i.product_id || null,
+        product_name: i.item,
+        qty: i.qty,
+        price: i.newPrice,
+        amount: i.qty * i.newPrice
+      })),
+      amount: Number(data.debitTotal),
+      reason: data.reason || "",
+      date: new Date().toISOString()
+    };
+ 
     console.log("DEBIT PAYLOAD:", payload);
-
+ 
     const res = await axios.post(
       "http://localhost:8000/api/debit-note",
       payload
     );
-
+ 
     if (res.data.success) {
+      // ✅ Notify InvoiceDetailPanel
+      window.dispatchEvent(
+        new CustomEvent("purchaseReturnCreated", {
+          detail: { purchase_id: debitNoteTarget.id }
+        })
+      );
+ 
       alert("Debit Note Created Successfully");
       setDebitNoteTarget(null);
     } else {
       alert("Error creating debit note");
     }
-
   } catch (err) {
     console.error("DEBIT ERROR:", err);
     alert("Server Error");
   }
 }}
+ 
         />
       )}
 

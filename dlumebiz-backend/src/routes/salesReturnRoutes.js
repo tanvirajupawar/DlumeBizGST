@@ -90,6 +90,56 @@ router.post("/sales-return", async (req, res) => {
   }
 });
 
+/* GET SALES RETURNS BY SALES ID */
+router.get("/sales-return/by-sales/:salesId", async (req, res) => {
+  try {
+
+    const returns = await SalesReturn.find({
+      sales_id: req.params.salesId
+    })
+
+      .populate({
+        path: "client_id",
+        select: `
+          first_name
+          last_name
+          company_name
+          gstin
+          phone
+          email
+          address_line1
+          city
+          state
+          pincode
+        `,
+      })
+
+      .populate("sales_id")
+
+      .lean();
+
+    res.json({
+      success: true,
+      data: returns.map((r) => ({
+        ...r,
+        details: r.details || [],
+      })),
+    });
+
+  } catch (err) {
+
+    console.error(
+      "GET SALES RETURN BY SALES ERROR:",
+      err
+    );
+
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
+
 /* GET ALL SALES RETURNS */
 router.get("/sales-return", async (req, res) => {
   try {

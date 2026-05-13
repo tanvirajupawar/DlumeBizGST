@@ -242,10 +242,17 @@ function DateFilter({ selected, onChange }) {
 // ─── Shared Table Styles ──────────────────────────────────────────────────────
 
 const TH_STYLE = {
-  padding: "7px 5px", fontSize: "9px", fontWeight: 600, color: "#6b7280",
-  textTransform: "uppercase", letterSpacing: "0.03em",
-  borderBottom: "1px solid #e5e7eb", background: "#f9fafb",
-  textAlign: "center", whiteSpace: "normal", lineHeight: "1.2",
+  padding: "7px 5px",
+  fontSize: "9px",
+  fontWeight: 600,
+  color: "#6b7280",
+  textTransform: "uppercase",
+  letterSpacing: "0.03em",
+  borderBottom: "1px solid #e5e7eb",
+  background: "#f9fafb",
+  textAlign: "center",
+  whiteSpace: "normal",
+  lineHeight: "1.2",
 };
 const TH_GROUP_STYLE = {
   ...TH_STYLE,
@@ -256,9 +263,24 @@ const TH_GROUP_STYLE = {
   color: "#1d4ed8",
   textAlign: "center",
 };
-const TD_STYLE = { padding: "8px 5px", fontSize: "11px", color: "#111827", textAlign: "center", borderTop: "1px solid #f3f4f6", wordBreak: "break-word", lineHeight: "1.3" };
-const TF_STYLE = { padding: "8px 5px", fontSize: "11px", fontWeight: 700, background: "#f9fafb", borderTop: "2px solid #e5e7eb", textAlign: "center" };
+const TD_STYLE = {
+  padding: "8px 5px",
+  fontSize: "11px",
+  color: "#111827",
+  textAlign: "center",
+  borderTop: "1px solid #f3f4f6",
+  wordBreak: "break-word",
+  lineHeight: "1.3",
+};
 
+const TF_STYLE = {
+  padding: "8px 5px",
+  fontSize: "11px",
+  fontWeight: 700,
+  background: "#f9fafb",
+  borderTop: "2px solid #e5e7eb",
+  textAlign: "center",
+};
 // ─── Tab: Purchase ────────────────────────────────────────────────────────────
 // Columns (13 total):
 // [1] GSTIN | [2] Vendor name |

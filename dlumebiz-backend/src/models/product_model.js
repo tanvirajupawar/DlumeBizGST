@@ -5,10 +5,11 @@ const productSchema = new Schema({
     type: String,
     required: true,
   },
-  barcode: {
+barcode: {
   type: String,
-  required: true,
+  default: null,
   unique: true,
+  sparse: true,
 },
   type: {
     type: String,

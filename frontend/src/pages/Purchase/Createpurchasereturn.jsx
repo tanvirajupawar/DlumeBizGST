@@ -210,45 +210,56 @@ const CreatePurchaseReturn = () => {
 const totalAmount = taxableAmount + gstAmount;
   const hasItems      = rows.some((r) => r.returnQty > 0);
 
-  const handleSubmit = async () => {
-   if (!vendor) {
-  alert("Please select vendor");
-  return;
-}
-
-if (!invoice) {
-  alert("Please select invoice");
-  return;
-}
-
-if (!hasItems) {
-  alert("Enter return quantity");
-  return;
-}
-    setSubmitting(true);
-    try {
-      await axios.post("http://localhost:8000/api/purchase-return", {
-        vendor_id: vendor._id,
-        purchase_id: invoice._id,
-        date: returnDate,
-        reason,
-      details:rows.filter((r) => r.returnQty > 0).map((r) => ({
-          product_name: r.product_name,
-          qty: r.returnQty,
-          price: r.price,
-          amount: r.returnQty * r.price,
-        })),
-     
-        total_amount: totalAmount,
-      });
-    navigate("/purchase-return-list");
-    } catch (err) {
-  console.error("SAVE ERROR:", err.response?.data || err.message);
-  alert(err.response?.data?.message || "Failed to save");
-} finally {
-      setSubmitting(false);
+const handleSubmit = async () => {
+  if (!vendor) {
+    alert("Please select vendor");
+    return;
+  }
+  if (!invoice) {
+    alert("Please select invoice");
+    return;
+  }
+  if (!hasItems) {
+    alert("Enter return quantity");
+    return;
+  }
+ 
+  setSubmitting(true);
+  try {
+    const res = await axios.post("http://localhost:8000/api/purchase-return", {
+      vendor_id: vendor._id,
+      purchase_id: invoice._id,
+      date: returnDate,
+      reason,
+      details: rows.filter((r) => r.returnQty > 0).map((r) => ({
+        product_name: r.product_name,
+        qty: r.returnQty,
+        price: r.price,
+        amount: r.returnQty * r.price,
+      })),
+      total_amount: totalAmount,
+    });
+ 
+    if (res.data.success) {
+      // ✅ Notify InvoiceDetailPanel — works even if the panel is open
+      //    in a different tab/page because it's a window event
+      window.dispatchEvent(
+        new CustomEvent("purchaseReturnCreated", {
+          detail: { purchase_id: invoice._id }
+        })
+      );
+ 
+      navigate("/purchase-return-list");
+    } else {
+      alert(res.data.message || "Failed to save");
     }
-  };
+  } catch (err) {
+    console.error("SAVE ERROR:", err.response?.data || err.message);
+    alert(err.response?.data?.message || "Failed to save");
+  } finally {
+    setSubmitting(false);
+  }
+};
 
   return (
     <div className="space-y-5">

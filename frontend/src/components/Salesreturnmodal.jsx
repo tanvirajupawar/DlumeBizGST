@@ -140,7 +140,7 @@ useEffect(() => {
                 max={item.qty}
                 value={item.returnQty}
                 onChange={(e) => handleQtyChange(idx, e.target.value)}
-                className="w-20 text-right border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-200"
+                className="w-20 text-right border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-200 no-spinner"
               />
             </div>
             <div className="py-3.5 text-right">
