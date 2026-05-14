@@ -9,8 +9,9 @@ exports.getPayments = async (req, res) => {
     const filter = {};
     if (req.query.vendor_id) filter.vendor_id = req.query.vendor_id;
 
-    const payments = await PaymentOut.find(filter).sort({ date: -1 });
-
+const payments = await PaymentOut.find(filter)
+  .populate("vendor_id", "vendor_name company_name")
+  .sort({ date: -1 });
     return res.json({
       success: true,
       data: payments,

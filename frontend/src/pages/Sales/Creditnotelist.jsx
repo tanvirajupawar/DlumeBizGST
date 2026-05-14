@@ -19,7 +19,7 @@ const CreditNoteList = () => {
   const navigate = useNavigate();
   const [notes, setNotes] = useState([]);
   const [search, setSearch] = useState("");
-  const [dateFilter, setDateFilter] = useState("Last 365 Days");
+  const [dateFilter, setDateFilter] = useState("All");
   const [selectedNote, setSelectedNote] = useState(null);
 
   useEffect(() => {

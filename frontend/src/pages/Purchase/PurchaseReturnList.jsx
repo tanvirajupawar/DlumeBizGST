@@ -112,7 +112,7 @@ const PurchaseReturnList = () => {
   const navigate = useNavigate();
   const [returns, setReturns] = useState([]);
   const [selectedReturn, setSelectedReturn] = useState(null);
-  const [dateFilter, setDateFilter] = useState("Last 365 Days");
+  const [dateFilter, setDateFilter] = useState("All");
 
   useEffect(() => { fetchReturns(); }, []);
 

@@ -3,7 +3,7 @@ import { HiOutlineCalendar } from "react-icons/hi";
 import { HiChevronDown } from "react-icons/hi";
 
 export const DEFAULT_FILTERS = [
-  "Today", "Yesterday", "This Week", "Last Week", "Last 7 Days",
+    "All","Today", "Yesterday", "This Week", "Last Week", "Last 7 Days",
   "This Month", "Previous Month", "Last 30 Days", "This Quarter",
   "Previous Quarter", "Current Fiscal Year", "Previous Fiscal Year",
   "Last 365 Days",

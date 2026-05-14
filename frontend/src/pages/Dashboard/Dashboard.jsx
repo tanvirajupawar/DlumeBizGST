@@ -41,16 +41,22 @@ const Dashboard = () => {
     try {
       const res = await axios.get(`${BASE_URL}/api/sales`);
       const data = res.data.data || res.data || [];
-      const mapped = data.map((inv) => {
+      const mapped = data.map((inv, index) => {
         const cust = inv.client_id || {};
         return {
           id: inv._id,
+          srNo: index + 1,
           customerName: ((cust.first_name || "") + " " + (cust.last_name || "")).trim() || "Walk-in",
+          companyName:
+  cust.company_name || "-",
           invoiceNo: inv.invoice_no || "",
           date: inv.invoice_date || "",
           amount: inv.total_amount || 0,
           status: inv.status === "Paid" ? "Paid" : inv.status === "Partial" ? "Partial" : "Unpaid",
-          isToday: (inv.invoice_date || "").startsWith(todayStr),
+          isToday:
+  inv.invoice_date &&
+  new Date(inv.invoice_date).toDateString() ===
+    new Date().toDateString(),
         };
       });
       setInvoices(mapped);
@@ -61,18 +67,38 @@ const Dashboard = () => {
 
   const fetchCollections = async () => {
     try {
-      const res = await axios.get(`${BASE_URL}/api/collections`);
+      const res = await axios.get(`${BASE_URL}/api/payment-in`);
       const data = res.data.data || res.data || [];
-      const mapped = data.map((col) => ({
-        id: col._id,
-        customer: col.customer_name || "Walk-in",
-        date: col.date || "",
-        remark: col.remark || "",
-        amount: col.amount || 0,
-        paymentMode: col.payment_method || "",
-        status: col.status || "Received",
-        isToday: (col.date || "").startsWith(todayStr),
-      }));
+const mapped = data.map((col, index) => ({
+  id: col._id,
+
+  srNo: index + 1,
+
+  customer:
+    `${col.client_id?.first_name || ""} ${
+      col.client_id?.last_name || ""
+    }`.trim() ||
+    col.client_id?.company_name ||
+    "Walk-in",
+
+  companyName:
+    col.client_id?.company_name || "-",
+
+  date: col.date || "",
+
+  remark: col.remark || "",
+
+  amount: col.amount || 0,
+
+  paymentMode: col.payment_mode || "",
+
+  status: "Paid",
+
+  isToday:
+    col.date &&
+    new Date(col.date).toDateString() ===
+      new Date().toDateString(),
+}));
       setCollections(mapped);
     } catch (err) {
       console.log("Fetch collections error:", err);
@@ -81,8 +107,15 @@ const Dashboard = () => {
 
   const todaySales = invoices.filter((i) => i.isToday).reduce((s, i) => s + i.amount, 0);
 
-  const recentInvoices = [...invoices].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 8);
-  const recentCollections = [...collections].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 8);
+const recentInvoices = [...invoices]
+  .filter((i) => i.isToday)
+  .sort((a, b) => new Date(b.date) - new Date(a.date))
+  .slice(0, 8);
+
+const recentCollections = [...collections]
+  .filter((i) => i.isToday)
+  .sort((a, b) => new Date(b.date) - new Date(a.date))
+  .slice(0, 8);
 
   const activeItems = activeTab === "invoices" ? recentInvoices : recentCollections;
 
@@ -165,13 +198,26 @@ const Dashboard = () => {
         </div>
 
         {/* Table Header */}
-        <div className="grid grid-cols-[2fr_1fr_1fr_100px] gap-3 px-6 py-2.5 bg-gray-50 border-b border-gray-100">
-          {["Customer", "Amount", "Date", "Status"].map((h, i) => (
+        <div className="grid grid-cols-[80px_1.5fr_1.5fr_1fr_1fr_100px] gap-3 px-6 py-2.5 bg-gray-50 border-b border-gray-100">
+          {[
+  "Sr No",
+  "Customer",
+  "Company",
+  "Amount",
+  "Date",
+  "Status",
+].map((h, i) => (
             <span
               key={h}
-              className={`text-[10px] font-bold text-gray-400 uppercase tracking-wider ${
-                i === 1 ? "text-right" : i === 2 ? "text-right" : i === 3 ? "text-center" : ""
-              }`}
+           className={`text-[10px] font-bold text-gray-400 uppercase tracking-wider ${
+  i === 3
+    ? "text-right"
+    : i === 4
+    ? "text-right"
+    : i === 5
+    ? "text-center"
+    : ""
+}`}
             >
               {h}
             </span>
@@ -195,23 +241,43 @@ const Dashboard = () => {
             <div
               key={item.id}
               onClick={() => activeTab === "invoices" ? navigate(`/invoice/${item.id}`) : undefined}
-              className={`grid grid-cols-[2fr_1fr_1fr_100px] gap-3 px-6 py-3.5 border-b border-gray-50 last:border-0 transition items-center ${
+              className={`grid grid-cols-[80px_1.5fr_1.5fr_1fr_1fr_100px] gap-3 px-6 py-3.5 border-b border-gray-50 last:border-0 transition items-center ${
                 activeTab === "invoices" ? "hover:bg-gray-50 cursor-pointer" : ""
               }`}
             >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">
-                  {activeTab === "invoices" ? item.customerName : item.customer}
-                </p>
-                <p className="text-[11px] text-gray-400 font-mono mt-0.5">
-                  {activeTab === "invoices" ? item.invoiceNo : item.remark || item.paymentMode}
-                </p>
-              </div>
-              <p className="text-sm font-semibold text-gray-800 text-right">{fmt(item.amount)}</p>
-              <p className="text-xs text-gray-400 text-right">{formatDate(item.date)}</p>
-              <div className="flex justify-center">
-                <StatusBadge status={item.status} />
-              </div>
+          <p className="text-sm text-gray-500">
+  {item.srNo}
+</p>
+
+<div className="min-w-0">
+  <p className="text-sm font-medium text-gray-800 truncate">
+    {activeTab === "invoices"
+      ? item.customerName
+      : item.customer}
+  </p>
+
+  <p className="text-[11px] text-gray-400 font-mono mt-0.5">
+    {activeTab === "invoices"
+      ? item.invoiceNo
+      : item.remark || item.paymentMode}
+  </p>
+</div>
+
+<p className="text-sm text-gray-600 truncate">
+  {item.companyName}
+</p>
+
+<p className="text-sm font-semibold text-gray-800 text-right">
+  {fmt(item.amount)}
+</p>
+
+<p className="text-xs text-gray-400 text-right">
+  {formatDate(item.date)}
+</p>
+
+<div className="flex justify-center">
+  <StatusBadge status={item.status} />
+</div>
             </div>
           ))
         )}

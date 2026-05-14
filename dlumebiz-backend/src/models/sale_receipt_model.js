@@ -3,6 +3,7 @@ const { Schema, model, Types } = require("mongoose");
 const SaleReceiptSchema = new Schema({
   sale_order_id: { type: Types.ObjectId, ref: "SaleOrder" },  
   client_id: { type: Types.ObjectId, ref: "Client" },  
+    invoice_no: { type: String, default: "" },
   amount: { type: Number, required: true },  
   payment_method: { type: String, default: "Cash" },
   remarks: { type: String, default: ''},

@@ -9,6 +9,7 @@ import ActionMenu from "../../components/ActionMenu";
 import SalesReturnModal from "../../components/SalesReturnModal";
 import CreditNoteModal from "../../components/CreditNoteModal";
 import StatusBadge from "../../components/StatusBadge";
+import DateFilter, { applyDateFilter } from "../../components/DateFilter";
 
 const fmt = (n) => "₹" + Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 });
 const TABS = ["Invoice", "Collection"];
@@ -133,8 +134,7 @@ const SalesInvoiceList = () => {
   const [collections, setCollections] = useState([]);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [search, setSearch] = useState("");
-
-  // modals
+const [dateFilter, setDateFilter] = useState("All");
   const [paymentTarget, setPaymentTarget] = useState(null);
   const [salesReturnTarget, setSalesReturnTarget] = useState(null);
   const [creditNoteTarget, setCreditNoteTarget] = useState(null);
@@ -160,7 +160,7 @@ const SalesInvoiceList = () => {
           customer_id: customer._id || inv.client_id?._id || inv.client_id || "",
           invoiceNo: inv.invoice_no || "",
           invoiceDate: inv.invoice_date || "",
-         status: inv.payment_status || inv.status || "Unpaid",
+        status: inv.status || "Unpaid",
           customerName: (customer.first_name || "") + " " + (customer.last_name || ""),
           companyName: customer.company_name || "Walk-in",
           date: inv.invoice_date
@@ -228,11 +228,13 @@ const mapped = (data || []).map((col) => ({
     ? `${col.client_id.first_name} ${col.client_id.last_name || ""}`.trim()
     : col.customer_name || "Walk-in",
 
-  refNo: col.payment_no || "-",
+  companyName:
+    col.client_id?.company_name ||
+    "Walk-in",
 
-  date: col.date
-    ? new Date(col.date).toLocaleDateString("en-GB")
-    : "-",
+  invoiceNo: col.invoice_no || "-",
+
+  date: col.date || "",
 
   method: col.payment_mode || "-",
 
@@ -291,22 +293,58 @@ const mapped = (data || []).map((col) => ({
     }
   };
 
+
+  const handleDelete = async (id) => {
+  try {
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this invoice?"
+    );
+
+    if (!confirmDelete) return;
+
+    await axios.delete(`http://localhost:8000/api/sales/${id}`);
+
+    alert("Invoice deleted successfully");
+
+    fetchInvoices();
+
+  } catch (err) {
+    console.error("DELETE ERROR:", err);
+    alert("Failed to delete invoice");
+  }
+};
+
   /* ── Filters & totals ── */
-  const filteredInvoices = invoices.filter(
-    (inv) =>
-      (inv.customerName + " " + inv.companyName)
-        .toLowerCase()
-        .includes(search.toLowerCase()) ||
-      inv.invoiceNo.toLowerCase().includes(search.toLowerCase())
-  );
+const filteredInvoices = applyDateFilter(
+  invoices,
+  "invoiceDate",
+  dateFilter
+).filter(
+  (inv) =>
+    ((inv.customerName || "") + " " + (inv.companyName || ""))
+      .toLowerCase()
+      .includes(search.toLowerCase()) ||
 
-  const filteredCollections = collections.filter(
-    (col) =>
-      col.customer.toLowerCase().includes(search.toLowerCase()) ||
-      (col.refNo || "").toLowerCase().includes(search.toLowerCase())
-  );
+    (inv.invoiceNo || "")
+      .toLowerCase()
+      .includes(search.toLowerCase())
+);
 
-  const totalSales = invoices.reduce((s, i) => s + i.amount, 0);
+const filteredCollections = applyDateFilter(
+  collections,
+  "date",
+  dateFilter
+).filter(  (col) =>
+    col.customer.toLowerCase().includes(search.toLowerCase()) ||
+
+    (col.invoiceNo || "")
+      .toLowerCase()
+      .includes(search.toLowerCase())
+);
+const totalSales = filteredInvoices.reduce(
+  (s, i) => s + i.amount,
+  0
+);
   const totalCollected = filteredCollections
     .filter((c) => c.status === "Received")
     .reduce((s, c) => s + c.amount, 0);
@@ -329,22 +367,33 @@ const mapped = (data || []).map((col) => ({
           ))}
         </div>
 
-        <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-lg px-4 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-            {isInvoice ? "Total Sales" : "Total Collected"}
-          </p>
-          <p className="text-sm font-bold text-green-600 tabular-nums">
-            {fmt(isInvoice ? totalSales : totalCollected)}
-          </p>
-        </div>
-      </div>
+<div className="flex items-center gap-3">
+
+  <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-lg px-4 py-2">
+    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
+      {isInvoice ? "Total Sales" : "Total Collected"}
+    </p>
+
+    <p className="text-sm font-bold text-green-600 tabular-nums">
+      {fmt(isInvoice ? totalSales : totalCollected)}
+    </p>
+  </div>
+
+  <DateFilter
+    value={dateFilter}
+    onChange={setDateFilter}
+  />
+
+</div>
+</div>
 
       {/* ── Table ── */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-visible">
 
         {/* Search + Add Button */}
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
-          <div className="relative w-80">
+<div className="flex items-center gap-3 w-full">
+    <div className="relative w-80">
             <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
             <input
               value={search}
@@ -354,18 +403,22 @@ const mapped = (data || []).map((col) => ({
             />
           </div>
 
-          {isInvoice && (
-            <Button
-              variant="navy"
-              size="sm"
-              className="flex items-center gap-2"
-              onClick={() => navigate("/sales-invoice")}
-            >
-              <FiPlus size={14} />
-              New Invoice
-            </Button>
-          )}
-        </div>
+{isInvoice && (
+ <Button
+  variant="navy"
+  size="sm"
+  className="flex items-center gap-2 ml-auto"
+    onClick={() => navigate("/sales-invoice")}
+  >
+    <FiPlus size={14} />
+    New Invoice
+  </Button>
+)}
+
+</div>
+</div>
+         
+        
 
         {/* ── Invoice Tab ── */}
         {isInvoice && (
@@ -423,7 +476,7 @@ const mapped = (data || []).map((col) => ({
                         onEdit={() => navigate(`/sales-invoice/${inv.id}/edit`)}
                         onSalesReturn={() => setSalesReturnTarget(inv)}
                         onCreditNote={() => setCreditNoteTarget(inv)}
-                        onDelete={() => console.log("delete", inv.id)}
+                        onDelete={() => handleDelete(inv.id)}
                       />
                     </div>
                   </div>
@@ -436,9 +489,19 @@ const mapped = (data || []).map((col) => ({
         {/* ── Collection Tab (mirrors Purchase Payments tab exactly) ── */}
         {!isInvoice && (
           <>
-            <div className="grid grid-cols-[1fr_130px_130px_110px_130px_100px] border-b border-gray-200 bg-gray-50 px-6">
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</div>
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Ref No</div>
+     <div className="grid grid-cols-[60px_1fr_1fr_130px_130px_110px_130px_100px] border-b border-gray-200 bg-gray-50 px-6">
+
+  <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">
+    Sr No
+  </div>
+
+  <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+    Customer
+  </div>
+  <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Company
+</div>
+              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice No</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Method</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right pr-6">Amount</div>
@@ -450,14 +513,26 @@ const mapped = (data || []).map((col) => ({
             )}
 
             {filteredCollections.map((col, idx) => (
-              <div
-                key={col.id}
-                className={`grid grid-cols-[1fr_130px_130px_110px_130px_100px] px-6 items-center hover:bg-gray-50 transition-colors
-                  ${idx !== filteredCollections.length - 1 ? "border-b border-gray-100" : ""}`}
-              >
-                <div className="py-4 text-sm font-medium text-gray-800">{col.customer}</div>
-                <div className="py-4 text-sm font-mono text-gray-500">{col.refNo}</div>
-                <div className="py-4 text-sm text-gray-500">{col.date}</div>
+             <div
+  key={col.id}
+  className={`grid grid-cols-[60px_1fr_1fr_130px_130px_110px_130px_100px] px-6 items-center hover:bg-gray-50 transition-colors
+    ${idx !== filteredCollections.length - 1 ? "border-b border-gray-100" : ""}`}
+>
+
+  <div className="py-4 text-sm text-center text-gray-500">
+    {idx + 1}
+  </div>
+
+  <div className="py-4 text-sm font-medium text-gray-800">
+    {col.customer}
+  </div>
+  <div className="py-4 text-sm text-gray-500">
+  {col.companyName}
+</div>
+                <div className="py-4 text-sm font-mono text-gray-500">{col.invoiceNo}</div>
+                <div className="py-4 text-sm text-gray-500">{col.date
+  ? new Date(col.date).toLocaleDateString("en-GB")
+  : "-"}</div>
                 <div className="py-4 text-sm text-gray-500">{col.method}</div>
                 <div className="py-4 text-sm font-semibold text-gray-800 text-right pr-6 tabular-nums">{fmt(col.amount)}</div>
                 <div className="py-4 flex justify-center">

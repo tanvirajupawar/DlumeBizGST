@@ -40,10 +40,12 @@ const [returnNumber, setReturnNumber] = useState("");
 useEffect(() => {
   const fetchReturnNumber = async () => {
     try {
-      const res = await axios.get("http://localhost:8000/api/sales-return/next-number");
+      const res = await axios.get(
+        "http://localhost:8000/api/sales-return/next-number"
+      );
 
       if (res.data.success) {
-        setReturnNumber(res.data.number);
+        setReturnNumber(res.data.return_no);
       }
     } catch (err) {
       console.error("SR NUMBER ERROR:", err);
@@ -52,6 +54,8 @@ useEffect(() => {
 
   fetchReturnNumber();
 }, []);
+
+
 
   const [returnItems, setReturnItems] = useState(
     invoice.items.map((item) => ({ ...item, returnQty: item.qty }))

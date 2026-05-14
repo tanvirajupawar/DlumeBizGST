@@ -385,8 +385,7 @@ win.document.write(`
       const company_id = localStorage.getItem("company_id") || "69c951fadb4d82158ef524ea";
       const res = await axios.get(`http://localhost:8000/api/product/company/${company_id}`);
       console.log("RAW ITEM 👉", res.data.data?.[0]);
-      setItems(
-        (res.data.data || []).map((item) => ({
+      const mapped = (res.data.data || []).map((item) => ({
           id:            item._id || item.id,
           product:       item.product || item.name || "",
           barcode: item.barcode || "",
@@ -408,8 +407,17 @@ win.document.write(`
 stockOut: Number(item.out ?? 0),
 total: Number(item.total ?? item.total_stock ?? 0),
           unit:          item.unit || "PCS",
-        }))
-      );
+      }));
+
+setItems(mapped);
+
+localStorage.setItem(
+  "stock_value",
+  mapped.reduce(
+    (s, i) => s + i.total * i.purchasePrice,
+    0
+  )
+);
     } catch (err) {
       console.error("Error fetching items:", err);
     } finally {

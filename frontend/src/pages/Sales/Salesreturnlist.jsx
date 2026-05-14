@@ -108,7 +108,7 @@ const SalesReturnList = () => {
   const navigate = useNavigate();
   const [returns, setReturns] = useState([]);
   const [selectedReturn, setSelectedReturn] = useState(null);
-  const [dateFilter, setDateFilter] = useState("Last 365 Days");
+  const [dateFilter, setDateFilter] = useState("All");
 
   useEffect(() => { fetchReturns(); }, []);
 
@@ -147,9 +147,17 @@ customerName: `${r.client_id?.first_name || ""} ${r.client_id?.last_name || ""}`
     }
   };
 
-  const totalAmount = returns.reduce((s, r) => s + r.amount, 0);
+const filteredReturns = applyDateFilter(
+  returns,
+  "date",
+  dateFilter
+);
 
-  const filteredReturns = applyDateFilter(returns, "date", dateFilter);
+const totalAmount = filteredReturns.reduce(
+  (s, r) => s + r.amount,
+  0
+);
+
 
   const handleDelete = async (id) => {
     const confirmDelete = window.confirm(

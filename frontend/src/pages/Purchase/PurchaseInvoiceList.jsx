@@ -13,7 +13,7 @@ import DebitNoteModal from "../../components/DebitNoteModal";
 import InvoiceDetailPanel from "../../components/InvoiceDetailPanel";
 import ActionMenu from "../../components/ActionMenu";
 import StatusBadge from "../../components/StatusBadge";
-
+import DateFilter, { applyDateFilter } from "../../components/DateFilter";
 
 const fmt = (n) => {
   const num = Number(n || 0);
@@ -167,6 +167,7 @@ const PurchaseInvoiceList = () => {
   const [invoices, setInvoices]                 = useState([]);
   const [confirmTarget, setConfirmTarget]       = useState(null);
   const [search, setSearch]                     = useState("");
+  const [dateFilter, setDateFilter] = useState("All");
   const [showPayableModal, setShowPayableModal] = useState(false);
   const [purchaseReturnTarget, setPurchaseReturnTarget] = useState(null);
   const [selectedInvoice, setSelectedInvoice]   = useState(null);
@@ -261,15 +262,25 @@ const handlePayment = async (data) => {
     setPaymentTarget(null);
   }
 };
-  const filteredInvoices = invoices.filter(inv =>
-    (inv.vendor || "").toLowerCase().includes(search.toLowerCase()) ||
+const filteredInvoices = applyDateFilter(
+  invoices,
+  "rawDate",
+  dateFilter
+).filter(inv =>
+      (inv.vendor || "").toLowerCase().includes(search.toLowerCase()) ||
     (inv.invoiceNo || "").toLowerCase().includes(search.toLowerCase())
   );
 
- const totalPurchases = invoices.reduce((s, i) => s + i.amount, 0);
-
- const filteredPayables = payments.filter(p =>
-  (p.vendor || "").toLowerCase().includes(search.toLowerCase()) ||
+const totalPurchases = filteredInvoices.reduce(
+  (s, i) => s + i.amount,
+  0
+);
+const filteredPayables = applyDateFilter(
+  payments,
+  "rawDate",
+  dateFilter
+).filter(p =>
+    (p.vendor || "").toLowerCase().includes(search.toLowerCase()) ||
   (p.refNo || "").toLowerCase().includes(search.toLowerCase())
 );
 
@@ -285,24 +296,42 @@ useEffect(() => {
     try {
       const res = await axios.get("http://localhost:8000/api/purchase");
       if (res.data.success) {
-        const formatted = res.data.data.map((p) => ({
-          id: p._id,
-          invoiceNo: p.supplier_invoice_no,
-vendor_id: p.vendor_id,
-vendor: p.vendor_id?.vendor_name || "Vendor",
-companyName: p.vendor_id?.company_name || "-",
-          date: new Date(p.invoice_date).toLocaleDateString("en-GB"),
-          amount: p.total_amount,
-         status: p.payment_status || "Unpaid",
-         paid_amount: p.paid_amount || 0,
-          items: (p.details || []).map((it) => ({
-            item: it.product_name,
-            bags: "-",
-            qty: it.qty,
-            price: it.price,
-            total: it.amount,
-          })),
-        }));
+const formatted = res.data.data.map((p) => ({
+  id: p._id,
+
+  invoiceNo: p.supplier_invoice_no,
+
+  vendor_id: p.vendor_id,
+
+  vendor:
+    p.vendor_id?.vendor_name || "Vendor",
+
+  companyName:
+    p.vendor_id?.company_name || "-",
+
+  date: new Date(
+    p.invoice_date
+  ).toLocaleDateString("en-GB"),
+
+  rawDate: p.invoice_date,
+
+  amount: p.total_amount,
+
+  status:
+    p.payment_status || "Unpaid",
+
+  paid_amount: p.paid_amount || 0,
+
+  items: (p.details || []).map(
+    (it) => ({
+      item: it.product_name,
+      bags: "-",
+      qty: it.qty,
+      price: it.price,
+      total: it.amount,
+    })
+  ),
+}));
         setInvoices(formatted);
       }
     } catch (err) { console.error(err); }
@@ -314,15 +343,39 @@ companyName: p.vendor_id?.company_name || "-",
     const res = await axios.get("http://localhost:8000/api/payment-out");
 
     if (res.data.success) {
-      const formatted = res.data.data.map((p) => ({
-        id: p._id,
-        vendor: p.vendor_id?.vendor_name || "Vendor",
-        refNo: p.payment_no,
-        date: new Date(p.date).toLocaleDateString("en-GB"),
-        method: p.payment_mode,
-        amount: p.amount,
-        status: "Paid",
-      }));
+  const formatted = res.data.data.map(
+  (p, index) => ({
+    id: p._id,
+
+    srNo: index + 1,
+
+    vendor:
+      p.vendor_id?.vendor_name ||
+      p.vendor_id?.company_name ||
+      p.vendor ||
+      p.vendor_name ||
+      p.party_name ||
+      "Vendor",
+
+    companyName:
+      p.vendor_id?.company_name ||
+      "-",
+
+    refNo: p.payment_no,
+
+    date: new Date(
+      p.date
+    ).toLocaleDateString("en-GB"),
+
+    rawDate: p.date,
+
+    method: p.payment_mode,
+
+    amount: p.amount,
+
+    status: "Paid",
+  })
+);
 
       setPayments(formatted);
     }
@@ -345,14 +398,24 @@ companyName: p.vendor_id?.company_name || "-",
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-lg px-4 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-            {isInvoice ? "Total Purchases" : "Total Payments"}
-          </p>
-          <p className="text-sm font-bold text-green-600 tabular-nums">
-            {fmt(isInvoice ? totalPurchases : totalPayables)}
-          </p>
-        </div>
+   <div className="flex items-center gap-3">
+
+  <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-lg px-4 py-2">
+    <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
+      {isInvoice ? "Total Purchases" : "Total Payments"}
+    </p>
+
+    <p className="text-sm font-bold text-green-600 tabular-nums">
+      {fmt(isInvoice ? totalPurchases : totalPayables)}
+    </p>
+  </div>
+
+  <DateFilter
+    value={dateFilter}
+    onChange={setDateFilter}
+  />
+
+</div>
       </div>
 
       {/* ── Table ── */}
@@ -453,13 +516,38 @@ companyName: p.vendor_id?.company_name || "-",
           </>
         ) : (
           <>
-            <div className="grid grid-cols-[1fr_130px_130px_110px_130px_100px] border-b border-gray-200 bg-gray-50 px-6">
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Vendor</div>
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Ref No</div>
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</div>
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Method</div>
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right pr-6">Amount</div>
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">Status</div>
+            <div className="grid grid-cols-[80px_1fr_1fr_130px_130px_110px_130px_100px] border-b border-gray-200 bg-gray-50 px-6">
+            <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Sr No
+</div>
+
+<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Vendor
+</div>
+
+<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Company
+</div>
+
+<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Ref No
+</div>
+
+<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Date
+</div>
+
+<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Method
+</div>
+
+<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right pr-6">
+  Amount
+</div>
+
+<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">
+  Status
+</div>
             </div>
 
             {filteredPayables.length === 0 && (
@@ -468,19 +556,52 @@ companyName: p.vendor_id?.company_name || "-",
 
             {filteredPayables.map((pay, idx) => (
               <div key={pay.id}
-                className={`grid grid-cols-[1fr_130px_130px_110px_130px_100px] px-6 items-center hover:bg-gray-50 transition-colors
+                className={`grid grid-cols-[80px_1fr_1fr_130px_130px_110px_130px_100px] px-6 items-center hover:bg-gray-50 transition-colors
                   ${idx !== filteredPayables.length - 1 ? "border-b border-gray-100" : ""}`}>
-                <div className="py-4"><p className="text-sm font-medium text-gray-800">{pay.vendor}</p></div>
-                <div className="py-4 text-sm font-mono text-gray-500">{pay.refNo}</div>
-                <div className="py-4 text-sm text-gray-500">{pay.date}</div>
-                <div className="py-4 text-sm text-gray-500">{pay.method}</div>
-                <div className="py-4 text-sm font-semibold text-gray-800 text-right pr-6 tabular-nums">{fmt(pay.amount)}</div>
-                <div className="py-4 flex justify-center">
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded
-                    ${pay.status === "Paid" ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
-                    {pay.status}
-                  </span>
-                </div>
+               <div className="py-4 text-sm text-gray-500">
+  {pay.srNo}
+</div>
+
+<div className="py-4">
+  <p className="text-sm font-medium text-gray-800">
+    {pay.vendor}
+  </p>
+</div>
+
+<div className="py-4">
+  <p className="text-sm text-gray-600">
+    {pay.companyName}
+  </p>
+</div>
+
+<div className="py-4 text-sm font-mono text-gray-500">
+  {pay.refNo}
+</div>
+
+<div className="py-4 text-sm text-gray-500">
+  {pay.date}
+</div>
+
+<div className="py-4 text-sm text-gray-500">
+  {pay.method}
+</div>
+
+<div className="py-4 text-sm font-semibold text-gray-800 text-right pr-6 tabular-nums">
+  {fmt(pay.amount)}
+</div>
+
+<div className="py-4 flex justify-center">
+  <span
+    className={`text-[10px] font-semibold px-2 py-0.5 rounded
+      ${
+        pay.status === "Paid"
+          ? "bg-green-50 text-green-700"
+          : "bg-amber-50 text-amber-700"
+      }`}
+  >
+    {pay.status}
+  </span>
+</div>
               </div>
             ))}
           </>

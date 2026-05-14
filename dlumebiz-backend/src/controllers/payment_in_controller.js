@@ -9,8 +9,9 @@ exports.getPaymentsIn = async (req, res) => {
     const filter = {};
     if (req.query.customer_id) filter.client_id = req.query.customer_id;
 
-    const payments = await SaleReceipt.find(filter).sort({ date: -1 });
-
+const payments = await SaleReceipt.find(filter)
+  .populate("client_id")
+  .sort({ date: -1 });
     return res.json({
       success: true,
       data: payments,
@@ -71,22 +72,12 @@ inv.paid_amount = alreadyPaid + pay;
 inv.balance_amount = totalAmt - inv.paid_amount;
 
 // ✅ STATUS
-if (inv.paid_amount >= totalAmt) {
-
-  inv.payment_status = "Paid";
-  inv.status = "Paid";
-
-} else if (inv.paid_amount > 0) {
-
-  inv.payment_status = "Partial Paid";
-  inv.status = "Partial Paid";
-
-} else {
-
-  inv.payment_status = "Unpaid";
-  inv.status = "Unpaid";
-}
-
+inv.status =
+  inv.paid_amount >= totalAmt
+    ? "Paid"
+    : inv.paid_amount > 0
+    ? "Partial"
+    : "Unpaid";
 remaining -= pay;
 
 await inv.save();
@@ -118,18 +109,22 @@ await inv.save();
       pending_amount: totalPending[0]?.total || 0,
     });
 
-    // 🔥 CREATE PAYMENT RECORD
-    const count = await SaleReceipt.countDocuments();
-    const payment_no = `RCPT-${String(count + 1).padStart(4, "0")}`;
+// 🔥 CREATE PAYMENT RECORD
+const count = await SaleReceipt.countDocuments();
+const payment_no = `RCPT-${String(count + 1).padStart(4, "0")}`;
 
-    const payment = await SaleReceipt.create({
-      client_id: customer_id,
-      amount: received,
-      payment_mode: payment_mode || "Cash",
-      remark: remark || "",
-      payment_no,
-      date: new Date(),
-    });
+const payment = await SaleReceipt.create({
+  client_id: customer_id,
+
+  // ✅ ADD THIS
+  invoice_no: invoices[0]?.invoice_no || "",
+
+  amount: received,
+  payment_mode: payment_mode || "Cash",
+  remark: remark || "",
+  payment_no,
+  date: new Date(),
+});
 
     return res.json({
       success: true,

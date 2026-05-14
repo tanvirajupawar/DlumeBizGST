@@ -6,7 +6,8 @@ import SalesReturnModal from "../../components/SalesReturnModal";
 import CreditNoteModal from "../../components/CreditNoteModal";
 import ActionMenu from "../../components/ActionMenu";
 import PaymentSuccessScreen from "../Payment/PaymentSuccessScreen";
-import { downloadExcel, downloadPDF} from "../../utils/exportUtils";
+import { downloadExcel } from "../../utils/exportUtils";
+
 const FILTERS = [
   "Today","Yesterday","This Week","Last Week","Last 7 Days",
   "This Month","Previous Month","Last 30 Days",
@@ -15,24 +16,307 @@ const FILTERS = [
   "Last 365 Days","Custom Date Range",
 ];
 
-const generatePDFFile = async (data, columns, title) => {
+// ── PDF Generator ─────────────────────────────────────────────────────────────
+const generatePDFFile = async (data, columns, title, customer = null) => {
   const { jsPDF } = await import("jspdf");
-  const autoTable = (await import("jspdf-autotable")).default;
+  const autoTable  = (await import("jspdf-autotable")).default;
 
-  const doc = new jsPDF();
+  const doc      = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW    = 210;
+  const pageH    = 297;
+  const margin   = 15;
+  const contentW = pageW - margin * 2;
 
+  const now     = new Date();
+  const dateStr = now.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  // ── helpers ──
+  const txt = (text, x, y, opts = {}) => doc.text(String(text ?? ""), x, y, opts);
+  const line = (x1, y1, x2, y2) => {
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.25);
+    doc.line(x1, y1, x2, y2);
+  };
+
+  // ── Page header (runs on page 1 only via manual call) ──
+  const drawPageHeader = () => {
+    // Company — left
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(20, 20, 20);
+    txt("D'Lume", margin, 14);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 100, 100);
+    txt("Ph: 9137826646", margin, 19);
+
+    // Report title — right
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(30, 30, 30);
+    txt(title, pageW - margin, 14, { align: "right" });
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(120, 120, 120);
+    txt(`Generated: ${dateStr}`, pageW - margin, 19, { align: "right" });
+
+    line(margin, 22, pageW - margin, 22);
+  };
+
+  drawPageHeader();
+  let y = 28;
+
+  // ── Customer block ──
+  if (customer) {
+    const name    = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim() || "—";
+    const phone   = customer.contact_no_1 || customer.phone || "—";
+    const email   = customer.email || "—";
+    const gstin   = customer.gstin || "—";
+    const pan     = customer.pan_number || "—";
+    const addr    = [customer.address_line_1, customer.city, customer.state, customer.pincode].filter(Boolean).join(", ") || "—";
+    const ship    = [customer.shipping_address_line_1, customer.shipping_city, customer.shipping_state, customer.shipping_pincode].filter(Boolean).join(", ") || "—";
+    const openBal = "Rs. " + Number(customer.opening_balance || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 });
+    const partyType = customer.party_type || "Customer";
+
+    // "To" block — left side
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(120, 120, 120);
+    txt("To,", margin, y);
+    y += 4.5;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(20, 20, 20);
+    txt(name, margin, y);
+    y += 5;
+
+    // Detail rows — two columns
+    const fields = [
+      ["Mobile",          phone,    "GSTIN",            gstin   ],
+      ["Email",           email.length > 35 ? email.substring(0,33)+"…" : email,
+                                    "PAN",              pan     ],
+      ["Party Type",      partyType,"Opening Balance",  openBal ],
+      ["Billing Address", addr.length > 35 ? addr.substring(0,33)+"…" : addr,
+                                    "Shipping Address", ship.length > 35 ? ship.substring(0,33)+"…" : ship],
+    ];
+
+    const lLabel = margin;
+    const lVal   = margin + 28;
+    const rLabel = margin + 95;
+    const rVal   = margin + 123;
+
+    fields.forEach(([ll, lv, rl, rv]) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(130, 130, 130);
+      txt(ll, lLabel, y);
+      txt(rl, rLabel, y);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(30, 30, 30);
+      txt(lv, lVal, y);
+      txt(rv, rVal, y);
+      y += 5;
+    });
+
+    y += 2;
+    line(margin, y, pageW - margin, y);
+    y += 5;
+  }
+
+  // ── Table ──
   autoTable(doc, {
+    startY: y,
     head: [columns.map(c => c.label)],
-    body: data.map(row => columns.map(c => row[c.key])),
+    body: data.map(row =>
+      columns.map(c => {
+        const val = row[c.key];
+        if (val === null || val === undefined) return "—";
+        return String(val);
+      })
+    ),
+    margin: { left: margin, right: margin },
+    tableWidth: contentW,
+    styles: {
+      fontSize: 8,
+      cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
+      font: "helvetica",
+      textColor: [25, 25, 25],
+      lineColor: [200, 200, 200],
+      lineWidth: 0.2,
+      overflow: "linebreak",
+    },
+    headStyles: {
+      fillColor: [240, 240, 240],
+      textColor: [25, 25, 25],
+      fontStyle: "bold",
+      fontSize: 7.5,
+      lineColor: [170, 170, 170],
+      lineWidth: 0.3,
+    },
+    alternateRowStyles: {
+      fillColor: [250, 250, 250],
+    },
+    bodyStyles: {
+      fillColor: [255, 255, 255],
+    },
+    columnStyles: {
+      ...(columns.length > 2 && {
+        [columns.length - 1]: { halign: "right" },
+        ...(columns.length > 3 && { [columns.length - 2]: { halign: "right" } }),
+        ...(columns.length > 4 && { [columns.length - 3]: { halign: "right" } }),
+      }),
+    },
+    didDrawPage: (hookData) => {
+      // Footer on every page
+      const pageCount = doc.internal.getNumberOfPages();
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      line(margin, pageH - 11, pageW - margin, pageH - 11);
+      txt(`Page ${hookData.pageNumber} of ${pageCount}`, pageW - margin, pageH - 6, { align: "right" });
+      txt("D'Lume — Confidential", margin, pageH - 6);
+    },
   });
+
+  // ── Totals summary ──
+  const lastY = doc.lastAutoTable.finalY;
+  const amountCols = columns.filter(c =>
+    ["amount", "balance", "debit", "credit"].some(k => c.key.toLowerCase().includes(k))
+  );
+
+  if (amountCols.length > 0 && data.length > 0) {
+    const summaryY = lastY + 4;
+
+    line(margin, summaryY, pageW - margin, summaryY);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 100, 100);
+    txt(`${data.length} record${data.length !== 1 ? "s" : ""}`, margin, summaryY + 5);
+
+    // Print totals right-to-left
+    let rightOffset = pageW - margin;
+    [...amountCols].reverse().forEach(col => {
+      const total = data.reduce((sum, row) => sum + Number(row[col.key] || 0), 0);
+      const formatted = "Rs. " + total.toLocaleString("en-IN", { minimumFractionDigits: 2 });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(120, 120, 120);
+      txt(`${col.label}:`, rightOffset - 28, summaryY + 5, { align: "right" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(20, 20, 20);
+      txt(formatted, rightOffset, summaryY + 5, { align: "right" });
+
+      rightOffset -= 52;
+    });
+  }
 
   const blob = doc.output("blob");
-
-  return new File([blob], `${title}.pdf`, {
-    type: "application/pdf",
-  });
+  return new File([blob], `${title}.pdf`, { type: "application/pdf" });
 };
 
+// ── Excel Generator ───────────────────────────────────────────────────────────
+const generateExcelFile = async (data, columns, title, customer = null) => {
+  const XLSX = await import("xlsx");
+
+  const wb = XLSX.utils.book_new();
+
+  // Build rows array
+  const rows = [];
+
+  // Company header rows
+  rows.push(["D'Lume"]);
+  rows.push(["Ph: 9137826646"]);
+  rows.push([`Report: ${title}`]);
+  rows.push([`Generated: ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`]);
+  rows.push([]); // blank
+
+  // Customer details block
+  if (customer) {
+    const name    = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim() || "—";
+    const phone   = customer.contact_no_1 || customer.phone || "—";
+    const email   = customer.email || "—";
+    const gstin   = customer.gstin || "—";
+    const pan     = customer.pan_number || "—";
+    const addr    = [customer.address_line_1, customer.city, customer.state, customer.pincode].filter(Boolean).join(", ") || "—";
+    const ship    = [customer.shipping_address_line_1, customer.shipping_city, customer.shipping_state, customer.shipping_pincode].filter(Boolean).join(", ") || "—";
+    const openBal = Number(customer.opening_balance || 0);
+    const partyType = customer.party_type || "Customer";
+
+    rows.push(["Party Name",       name]);
+    rows.push(["Party Type",       partyType]);
+    rows.push(["Mobile",           phone]);
+    rows.push(["Email",            email]);
+    rows.push(["GSTIN",            gstin]);
+    rows.push(["PAN",              pan]);
+    rows.push(["Opening Balance",  openBal]);
+    rows.push(["Billing Address",  addr]);
+    rows.push(["Shipping Address", ship]);
+    rows.push([]); // blank
+  }
+
+  // Table header
+  rows.push(columns.map(c => c.label));
+
+  // Table data
+  data.forEach(row => {
+    rows.push(columns.map(c => {
+      const val = row[c.key];
+      if (val === null || val === undefined) return "";
+      // Keep numbers as numbers for Excel
+      if (typeof val === "number") return val;
+      const num = Number(val);
+      if (!isNaN(num) && val !== "" && val !== "—" && val !== "-") return num;
+      return String(val);
+    }));
+  });
+
+  // Totals row
+  const amountCols = columns.filter(c =>
+    ["amount", "balance", "debit", "credit"].some(k => c.key.toLowerCase().includes(k))
+  );
+  if (amountCols.length > 0 && data.length > 0) {
+    rows.push([]); // blank before totals
+    const totalsRow = columns.map(col => {
+      if (amountCols.some(ac => ac.key === col.key)) {
+        return data.reduce((sum, row) => sum + Number(row[col.key] || 0), 0);
+      }
+      return col.key === columns[0].key ? "TOTAL" : "";
+    });
+    rows.push(totalsRow);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Set column widths
+  ws["!cols"] = columns.map(c => {
+    if (["address", "addr", "email"].some(k => c.key.toLowerCase().includes(k))) return { wch: 38 };
+    if (["amount", "balance", "debit", "credit"].some(k => c.key.toLowerCase().includes(k))) return { wch: 16 };
+    return { wch: 18 };
+  });
+
+  XLSX.utils.book_append_sheet(wb, ws, title.substring(0, 31));
+
+  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob  = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  return new File([blob], `${title}.xlsx`, { type: blob.type });
+};
+
+// ── download helpers ──────────────────────────────────────────────────────────
+const triggerDownload = (file) => {
+  const url = URL.createObjectURL(file);
+  const a   = document.createElement("a");
+  a.href = url; a.download = file.name; a.click();
+  URL.revokeObjectURL(url);
+};
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 const Ico = {
@@ -72,10 +356,9 @@ const getDateRange = (filter) => {
   return `${format(from)} to ${format(to)}`;
 };
 
-// ── helper: get balance for a row ─────────────────────────────────────────────
 const getBalance = (r) => {
   const total = Number(r.total_amount || 0);
-  const paid  = Number(r.paid_amount || 0);
+  const paid  = Number(r.paid_amount  || 0);
   return total - paid;
 };
 
@@ -132,7 +415,7 @@ const TableView = ({ cols, rows, onRowClick }) => (
           <tr key={i} onClick={() => onRowClick && onRowClick(row)}
             className={`border-b border-gray-100 last:border-0 transition ${onRowClick ? "hover:bg-gray-50/60 cursor-pointer" : ""}`}>
             {cols.map((c) => (
-              <td key={c.key} className="px-4 py-[11px] text-gray-700">{c.render ? c.render(row) : row[c.key]}</td>
+              <td key={c.key} className="px-4 py-[11px] text-gray-700">{c.render ? c.render(row, i) : row[c.key]}</td>
             ))}
           </tr>
         ))}
@@ -155,22 +438,12 @@ const PField = ({ label, value }) => (
   </div>
 );
 
-const downloadCSV = (filename, headers, rows) => {
-  const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-};
-
 const openPrintWindow = (title, tableHTML) => {
   const html = `<html><head><title>${title}</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,sans-serif;font-size:13px;color:#111;padding:32px}h2{font-size:18px;font-weight:600;margin-bottom:20px}table{width:100%;border-collapse:collapse}th{background:#f5f5f5;padding:9px 12px;text-align:left;font-weight:600;border-bottom:2px solid #e0e0e0}td{padding:9px 12px;border-bottom:1px solid #ebebeb}tr:last-child td{border-bottom:none}</style></head><body><h2>${title}</h2>${tableHTML}</body></html>`;
   const win = window.open("", "_blank");
   win.document.write(html); win.document.close(); win.focus();
   setTimeout(() => win.print(), 300);
 };
-
 
 // ── Receive Modal ─────────────────────────────────────────────────────────────
 function ReceiveModal({ invoices, customerId, onClose, onSuccess }) {
@@ -189,9 +462,7 @@ function ReceiveModal({ invoices, customerId, onClose, onSuccess }) {
         amount: Number(amount),
         payment_mode: mode,
         remark,
-        invoice_ids: invoices
-  .filter(inv => getBalance(inv) > 0)
-  .map(inv => inv._id),
+        invoice_ids: invoices.filter(inv => getBalance(inv) > 0).map(inv => inv._id),
       });
       if (res.data.success) {
         window.dispatchEvent(new Event("paymentUpdated"));
@@ -211,8 +482,6 @@ function ReceiveModal({ invoices, customerId, onClose, onSuccess }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-[440px] p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <h2 className="text-[15px] font-semibold text-gray-800">Receive Payment for Selected Invoices</h2>
-
-        {/* Invoice breakdown */}
         <div className="border border-gray-100 rounded-xl overflow-hidden text-[12px]">
           {invoices.map((inv, i) => (
             <div key={i} className="flex justify-between px-4 py-2.5 border-b border-gray-100 last:border-0">
@@ -225,49 +494,26 @@ function ReceiveModal({ invoices, customerId, onClose, onSuccess }) {
             <span className="text-blue-700">{fmt(totalDue)}</span>
           </div>
         </div>
-
-        {/* Amount */}
         <div>
           <label className="text-[12px] text-gray-500 mb-1 block">Amount to Receive</label>
           <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
             <span className="px-3 py-2 bg-gray-50 text-sm text-gray-500 border-r border-gray-200">₹</span>
-            <input
-              type="number"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              className="flex-1 px-3 py-2 text-sm focus:outline-none tabular-nums"
-            />
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} className="flex-1 px-3 py-2 text-sm focus:outline-none tabular-nums" />
           </div>
         </div>
-
-        {/* Payment Mode */}
         <div>
           <label className="text-[12px] text-gray-500 mb-1 block">Payment Mode</label>
-          <select value={mode} onChange={e => setMode(e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
-            <option>Cash</option>
-            <option>UPI</option>
-            <option>Bank Transfer</option>
-            <option>Cheque</option>
+          <select value={mode} onChange={e => setMode(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
+            <option>Cash</option><option>UPI</option><option>Bank Transfer</option><option>Cheque</option>
           </select>
         </div>
-
-        {/* Remark */}
         <div>
           <label className="text-[12px] text-gray-500 mb-1 block">Remark (optional)</label>
-          <input value={remark} onChange={e => setRemark(e.target.value)}
-            placeholder="Add a note..."
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+          <input value={remark} onChange={e => setRemark(e.target.value)} placeholder="Add a note..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
         </div>
-
-        {/* Actions */}
         <div className="flex gap-3 pt-1">
-          <button onClick={onClose}
-            className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">
-            Cancel
-          </button>
-          <button onClick={handleReceive} disabled={saving}
-            className="flex-1 py-2 bg-[#1e3a8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50">
+          <button onClick={onClose} className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={handleReceive} disabled={saving} className="flex-1 py-2 bg-[#1e3a8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50">
             {saving ? "Saving..." : "Confirm Receipt"}
           </button>
         </div>
@@ -277,16 +523,16 @@ function ReceiveModal({ invoices, customerId, onClose, onSuccess }) {
 }
 
 // ── Tab: Transactions ─────────────────────────────────────────────────────────
-function TransactionsTab({ customerId,customerName, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
-  const [invoices, setInvoices]               = useState([]);
-  const [loading, setLoading]                 = useState(true);
-  const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [showSuccess, setShowSuccess]         = useState(false);
-  const [paymentData, setPaymentData]         = useState(null);
+function TransactionsTab({ customerId, customerName, customer, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+  const [invoices, setInvoices]                   = useState([]);
+  const [loading, setLoading]                     = useState(true);
+  const [selectedInvoice, setSelectedInvoice]     = useState(null);
+  const [showSuccess, setShowSuccess]             = useState(false);
+  const [paymentData, setPaymentData]             = useState(null);
   const [salesReturnTarget, setSalesReturnTarget] = useState(null);
   const [creditNoteTarget, setCreditNoteTarget]   = useState(null);
-  const [selected, setSelected]               = useState([]);
-  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [selected, setSelected]                   = useState([]);
+  const [showReceiveModal, setShowReceiveModal]   = useState(false);
 
   const fetchInvoices = async () => {
     if (!customerId) return;
@@ -297,7 +543,6 @@ function TransactionsTab({ customerId,customerName, showFilter, setShowFilter, s
   };
 
   useEffect(() => { setLoading(true); fetchInvoices().finally(() => setLoading(false)); }, [customerId]);
-
   useEffect(() => {
     const handle = () => { setLoading(true); fetchInvoices().finally(() => setLoading(false)); };
     window.addEventListener("paymentUpdated", handle);
@@ -312,53 +557,40 @@ function TransactionsTab({ customerId,customerName, showFilter, setShowFilter, s
 
   const selectedInvoices = invoices.filter(r => selected.includes(r._id));
 
-  const getInvoiceExportData = () => {
-  return invoices.map((r) => ({
-    date: fmtDate(r.invoice_date),
+  const getInvoiceExportData = () => invoices.map(r => ({
+    date:    fmtDate(r.invoice_date),
     invoice: r.invoice_no || r.sales_invoice_no || "-",
-    amount: r.total_amount || 0,
+    amount:  r.total_amount || 0,
     balance: getBalance(r),
-    status: r.payment_status || "-",
+    status:  r.payment_status || "-",
   }));
-};
 
-const invoiceColumns = [
-  { key: "date", label: "Date" },
-  { key: "invoice", label: "Invoice No" },
-  { key: "amount", label: "Amount" },
-  { key: "balance", label: "Balance" },
-  { key: "status", label: "Status" },
-];
+  const invoiceColumns = [
+    { key: "date",    label: "Date"       },
+    { key: "invoice", label: "Invoice No" },
+    { key: "amount",  label: "Amount"     },
+    { key: "balance", label: "Balance"    },
+    { key: "status",  label: "Status"     },
+  ];
 
-const handleExcel = () => {
-  downloadExcel(getInvoiceExportData(), "Invoices");
-};
+  const handleExcel = async () => {
+    const file = await generateExcelFile(getInvoiceExportData(), invoiceColumns, "Sales Invoices", customer);
+    triggerDownload(file);
+  };
 
-const handlePDF = () => {
-  downloadPDF(getInvoiceExportData(), invoiceColumns, "Invoices");
-};
+  const handlePDF = async () => {
+    const file = await generatePDFFile(getInvoiceExportData(), invoiceColumns, "Sales Invoices", customer);
+    triggerDownload(file);
+  };
 
-
-const sharePDF = async () => {
-  try {
-    const file = await generatePDFFile(
-      getInvoiceExportData(),
-      invoiceColumns,
-      "Sales Invoices"
-    );
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({
-        title: "Invoices PDF",
-        files: [file],
-      });
-    } else {
-      alert("Sharing not supported");
-    }
-  } catch (err) {
-    console.error(err);
-  }
-};
+  const sharePDF = async () => {
+    try {
+      const file = await generatePDFFile(getInvoiceExportData(), invoiceColumns, "Sales Invoices", customer);
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ title: "Invoices PDF", files: [file] });
+      } else { alert("Sharing not supported"); }
+    } catch (err) { console.error(err); }
+  };
 
   const handlePrint = () => {
     const tableHTML = `<table><thead><tr><th>Date</th><th>Invoice No</th><th>Amount</th><th>Balance</th><th>Status</th></tr></thead><tbody>
@@ -376,19 +608,15 @@ const sharePDF = async () => {
       label: (
         <input type="checkbox"
           checked={selected.length > 0 && selected.length === invoices.filter(r => getBalance(r) > 0).length}
-          onChange={toggleAll}
-          onClick={e => e.stopPropagation()}
-        />
+          onChange={toggleAll} onClick={e => e.stopPropagation()} />
       ),
       render: (r) => {
         const isPaid = getBalance(r) === 0;
-        if (isPaid) {
-          return <input type="checkbox" checked={true} readOnly onClick={e => e.stopPropagation()} className="accent-green-500 cursor-not-allowed" />;
-        }
+        if (isPaid) return <input type="checkbox" checked={true} readOnly onClick={e => e.stopPropagation()} className="accent-green-500 cursor-not-allowed" />;
         return <input type="checkbox" checked={selected.includes(r._id)} onChange={() => toggleRow(r._id)} onClick={e => e.stopPropagation()} />;
       },
     },
-    { key: "invoice_date", label: "Date", sortable: true, render: r => fmtDate(r.invoice_date) },
+    { key: "invoice_date", label: "Date",       sortable: true, render: r => fmtDate(r.invoice_date) },
     { key: "invoice_no",   label: "Invoice No", render: r => r.invoice_no || r.sales_invoice_no || "—" },
     {
       key: "total_amount", label: "Amount",
@@ -404,8 +632,7 @@ const sharePDF = async () => {
     {
       key: "payment_status", label: "Status",
       render: r => {
-        const bal    = getBalance(r);
-        const total  = Number(r.total_amount || 0);
+        const bal = getBalance(r); const total = Number(r.total_amount || 0);
         const status = bal === 0 ? "Paid" : bal < total ? "Partial" : "Unpaid";
         return (
           <span className={`inline-block px-2.5 py-[3px] text-[12px] font-medium rounded-full border
@@ -417,44 +644,15 @@ const sharePDF = async () => {
         );
       },
     },
-    {
-      key: "actions", label: "",
-      render: r => (
-        <ActionMenu invoice={r}
-          onEdit={() => console.log("Edit", r)}
-          onSalesReturn={() => setSalesReturnTarget({
-            ...r,
-            items: (r.details || []).map(d => ({ item: d.product_name, qty: d.qty, price: d.price, product_id: d.product_id })),
-            invoiceNo: r.invoice_no || r.sales_invoice_no,
-            customer: r.customer_id?.customer_name || r.customer_id?.first_name || "—",
-            date: r.invoice_date,
-          })}
-          onCreditNote={() => setCreditNoteTarget({
-            ...r,
-            items: (r.details || []).map(d => ({ item: d.product_name, qty: d.qty, price: d.price, product_id: d.product_id })),
-            invoiceNo: r.invoice_no || r.sales_invoice_no,
-            customer: r.customer_id?.customer_name || r.customer_id?.first_name || "—",
-            date: r.invoice_date,
-          })}
-          onDelete={() => console.log("Delete", r)}
-        />
-      ),
-    },
+  
   ];
 
   if (showSuccess) {
     return (
       <PaymentSuccessScreen
-        amount={paymentData?.amount}
-        method={paymentData?.method}
-        date={paymentData?.date}
-        customer={paymentData?.customer}
-        onDone={() => {
-          setShowSuccess(false);
-          setSelected([]);
-          setLoading(true);
-          fetchInvoices().finally(() => setLoading(false));
-        }}
+        amount={paymentData?.amount} method={paymentData?.method}
+        date={paymentData?.date}    customer={paymentData?.customer}
+        onDone={() => { setShowSuccess(false); setSelected([]); setLoading(true); fetchInvoices().finally(() => setLoading(false)); }}
       />
     );
   }
@@ -463,17 +661,12 @@ const sharePDF = async () => {
     <>
       <div className="flex gap-2.5 mb-4 flex-wrap">
         <DateFilter showFilter={showFilter} setShowFilter={setShowFilter} selectedFilter={selectedFilter} setSelectedFilter={setSelectedFilter} hoveredFilter={hoveredFilter} setHoveredFilter={setHoveredFilter} filterRef={filterRef} />
-     <ActionBtn icon={Ico.Download} label="Excel" onClick={handleExcel} />
-<ActionBtn icon={Ico.Print} label="PDF" onClick={handlePDF} />
-        <button onClick={sharePDF}
-          className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition">
+        <ActionBtn icon={Ico.Download} label="Excel" onClick={handleExcel} />
+        <ActionBtn icon={Ico.Print}    label="PDF"   onClick={handlePDF}   />
+        <button onClick={sharePDF} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition">
           <Ico.Share /> Share <Ico.Chevron />
         </button>
-
-        {/* ✅ Receive button — opens ReceiveModal */}
-        <button
-          disabled={selected.length === 0}
-          onClick={() => setShowReceiveModal(true)}
+        <button disabled={selected.length === 0} onClick={() => setShowReceiveModal(true)}
           className={`px-4 py-[7px] text-[13px] font-medium rounded-md transition
             ${selected.length === 0 ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-green-600 text-white hover:bg-green-700"}`}>
           Receive ({selected.length})
@@ -486,33 +679,23 @@ const sharePDF = async () => {
             setSelectedInvoice({
               ...row,
               invoiceNo: row.invoice_no || row.sales_invoice_no,
-              amount: row.total_amount,
-              items: (row.details || []).map(d => ({ item: d.product_name, qty: d.qty, price: d.price, total: d.amount })),
-              customer: row.customer_id?.customer_name || row.customer_id?.first_name || "—",
-              date: new Date(row.invoice_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+              amount:    row.total_amount,
+              items:     (row.details || []).map(d => ({ item: d.product_name, qty: d.qty, price: d.price, total: d.amount })),
+              customer:  row.customer_id?.customer_name || row.customer_id?.first_name || "—",
+              date:      new Date(row.invoice_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
             });
           }} />
       }
 
       {selectedInvoice && <InvoiceDetailPanel invoice={selectedInvoice} onClose={() => setSelectedInvoice(null)} />}
 
-      {/* ✅ Receive Modal */}
       {showReceiveModal && (
         <ReceiveModal
-          invoices={selectedInvoices}
-          customerId={customerId}
+          invoices={selectedInvoices} customerId={customerId}
           onClose={() => setShowReceiveModal(false)}
           onSuccess={(data) => {
             setShowReceiveModal(false);
-            setPaymentData({
-              amount: data.amount,
-              method: data.payment_mode,
-              date: new Date().toLocaleDateString("en-GB"),
-          customer: {
-  first_name: customerName,
-  contact_no_1: "",
-},
-            });
+            setPaymentData({ amount: data.amount, method: data.payment_mode, date: new Date().toLocaleDateString("en-GB"), customer: { first_name: customerName, contact_no_1: "" } });
             setShowSuccess(true);
           }}
         />
@@ -523,18 +706,10 @@ const sharePDF = async () => {
           onConfirm={async (data) => {
             try {
               const res = await axios.post("http://localhost:8000/api/sales-return", {
-                sales_id: salesReturnTarget._id,
-                customer_id: salesReturnTarget.customer_id?._id,
+                sales_id: salesReturnTarget._id, customer_id: salesReturnTarget.customer_id?._id,
                 date: data.date,
-                details: (data.items || []).map(it => ({
-                  product_id: it.product_id || null,
-                  product_name: it.item,
-                  qty: it.returnQty,
-                  price: it.price,
-                  amount: it.returnQty * it.price,
-                })),
-                total_amount: data.total || 0,
-                reason: data.reason || "",
+                details: (data.items || []).map(it => ({ product_id: it.product_id || null, product_name: it.item, qty: it.returnQty, price: it.price, amount: it.returnQty * it.price })),
+                total_amount: data.total || 0, reason: data.reason || "",
               });
               if (res.data.success) { alert("Sales Return Created Successfully"); setSalesReturnTarget(null); }
             } catch (err) { console.error(err); alert("Server Error"); }
@@ -547,18 +722,9 @@ const sharePDF = async () => {
           onConfirm={async (data) => {
             try {
               const res = await axios.post("http://localhost:8000/api/credit-note", {
-                sales_id: creditNoteTarget._id,
-                customer_id: creditNoteTarget.customer_id?._id,
-                details: (data.items || []).map(i => ({
-                  product_id: i.product_id || null,
-                  product_name: i.item,
-                  qty: i.qty,
-                  price: i.newPrice,
-                  amount: i.qty * i.newPrice,
-                })),
-                amount: Number(data.creditTotal),
-                reason: data.reason || "",
-                date: new Date().toISOString(),
+                sales_id: creditNoteTarget._id, customer_id: creditNoteTarget.customer_id?._id,
+                details: (data.items || []).map(i => ({ product_id: i.product_id || null, product_name: i.item, qty: i.qty, price: i.newPrice, amount: i.qty * i.newPrice })),
+                amount: Number(data.creditTotal), reason: data.reason || "", date: new Date().toISOString(),
               });
               if (res.data.success) { alert("Credit Note Created Successfully"); setCreditNoteTarget(null); }
             } catch (err) { console.error(err); alert("Server Error"); }
@@ -569,13 +735,19 @@ const sharePDF = async () => {
   );
 }
 
-// ── Tab: Profile ──────────────────────────────────────────────────────────────
+// ── EditField ─────────────────────────────────────────────────────────────────
+const EditField = ({ label, fieldKey, form, set, type = "text" }) => (
+  <div>
+    <label className="text-[12px] text-gray-500 mb-1 block">{label}</label>
+    <input type={type} value={form[fieldKey] || ""} onChange={(e) => set(fieldKey, e.target.value)}
+      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+  </div>
+);
 
-
+// ── EditCustomerModal ─────────────────────────────────────────────────────────
 function EditCustomerModal({ customer, onClose, onSave }) {
-
   const [form, setForm] = useState(() => ({
-    customer_name: customer.customer_name || "",
+    company_name: customer.company_name || "",
     first_name: customer.first_name || "",
     last_name: customer.last_name || "",
     party_type: customer.party_type || "Customer",
@@ -584,12 +756,10 @@ function EditCustomerModal({ customer, onClose, onSave }) {
     opening_balance: customer.opening_balance ?? 0,
     gstin: customer.gstin || "",
     pan_number: customer.pan_number || "",
-
     address_line_1: customer.address_line_1 || "",
     city: customer.city || "",
     state: customer.state || "",
     pincode: customer.pincode || "",
-
     shipping_address_line_1: customer.shipping_address_line_1 || "",
     shipping_city: customer.shipping_city || "",
     shipping_state: customer.shipping_state || "",
@@ -597,204 +767,125 @@ function EditCustomerModal({ customer, onClose, onSave }) {
   }));
 
   const [saving, setSaving] = useState(false);
-
   const set = (key, val) => setForm(prev => ({ ...prev, [key]: val }));
 
   const handleSave = async () => {
-    if (!form.customer_name && !form.first_name) {
-      alert("Customer name is required");
-      return;
-    }
-
+    if (!form.first_name && !form.company_name) { alert("First Name or Company Name is required"); return; }
     setSaving(true);
-
     try {
-      const payload = {
-        ...form,
-        opening_balance: Number(form.opening_balance || 0),
-      };
-
-      const res = await axios.put(
-        `http://localhost:8000/api/customers/${customer._id}`,
-        payload
-      );
-
+      const payload = { ...form, opening_balance: Number(form.opening_balance || 0) };
+      const res = await axios.put(`http://localhost:8000/api/customers/${customer._id}`, payload);
       if (res.data.success) {
-        const updatedCustomer = res.data.data;
-
-        if (updatedCustomer) {
-          onSave(updatedCustomer);
-        } else {
-          onSave({
-            ...customer,
-            ...payload,
-          });
-        }
-      } else {
-        alert("Failed to save changes");
-      }
-
-    } catch (err) {
-      console.error(err);
-      alert("Server error while saving");
-    } finally {
-      setSaving(false);
-    }
+        onSave(res.data.data || { ...customer, ...payload });
+      } else { alert("Failed to save changes"); }
+    } catch (err) { console.error(err); alert("Server error while saving"); }
+    finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-[620px] max-h-[85vh] flex flex-col overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-
-        {/* Header */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[1px]" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[700px] max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-[15px] font-semibold text-gray-800">Edit Customer</h2>
-          <button onClick={onClose}
-            className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:bg-gray-100 text-lg">
-            ×
-          </button>
+          <h2 className="text-[16px] font-semibold text-gray-800">Edit Customer</h2>
+          <button onClick={onClose} className="w-8 h-8 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 hover:bg-gray-100 text-lg">×</button>
         </div>
-
-        {/* Body */}
-        <div className="overflow-y-auto px-6 py-5 space-y-5 flex-1">
-
-          {/* General */}
+        <div className="overflow-y-auto px-6 py-5 space-y-6 flex-1">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
-              General Details
-            </p>
-
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-4">General Details</p>
             <div className="grid grid-cols-2 gap-4">
-              <EditField label="Customer Name" fieldKey="customer_name" form={form} set={set} />
-              <EditField label="First Name" fieldKey="first_name" form={form} set={set} />
-              <EditField label="Last Name" fieldKey="last_name" form={form} set={set} />
-              <EditField label="Mobile Number" fieldKey="contact_no_1" form={form} set={set} />
-
+              <EditField label="Company Name"    fieldKey="company_name"    form={form} set={set} />
+              <div>
+                <label className="text-[12px] text-gray-500 mb-1 block">Party Type</label>
+                <select value={form.party_type} onChange={e => set("party_type", e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+                  <option>Customer</option><option>Supplier</option>
+                </select>
+              </div>
+              <EditField label="First Name"      fieldKey="first_name"      form={form} set={set} />
+              <EditField label="Last Name"       fieldKey="last_name"       form={form} set={set} />
+              <EditField label="Mobile Number"   fieldKey="contact_no_1"    form={form} set={set} />
+              <EditField label="Opening Balance" fieldKey="opening_balance" type="number" form={form} set={set} />
               <div className="col-span-2">
                 <EditField label="Email" fieldKey="email" type="email" form={form} set={set} />
               </div>
-
-              <EditField label="Opening Balance" fieldKey="opening_balance" type="number" form={form} set={set} />
             </div>
           </div>
-
-          {/* Business */}
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
-              Business Details
-            </p>
-
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-4">Business Details</p>
             <div className="grid grid-cols-2 gap-4">
-              <EditField label="GSTIN" fieldKey="gstin" form={form} set={set} />
-              <EditField label="PAN Number" fieldKey="pan_number" form={form} set={set} />
+              <EditField label="GSTIN"      fieldKey="gstin"       form={form} set={set} />
+              <EditField label="PAN Number" fieldKey="pan_number"  form={form} set={set} />
             </div>
           </div>
-
-          {/* Billing Address */}
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
-              Billing Address
-            </p>
-
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-4">Billing Address</p>
             <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <EditField label="Address Line 1" fieldKey="address_line_1" form={form} set={set} />
-              </div>
-
-              <EditField label="City" fieldKey="city" form={form} set={set} />
-              <EditField label="State" fieldKey="state" form={form} set={set} />
+              <div className="col-span-2"><EditField label="Address Line 1" fieldKey="address_line_1" form={form} set={set} /></div>
+              <EditField label="City"    fieldKey="city"    form={form} set={set} />
+              <EditField label="State"   fieldKey="state"   form={form} set={set} />
               <EditField label="Pincode" fieldKey="pincode" form={form} set={set} />
             </div>
           </div>
-
-          {/* Shipping */}
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-3">
-              Shipping Address
-            </p>
-
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 mb-4">Shipping Address</p>
             <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <EditField label="Address Line 1" fieldKey="shipping_address_line_1" form={form} set={set} />
-              </div>
-
-              <EditField label="City" fieldKey="shipping_city" form={form} set={set} />
-              <EditField label="State" fieldKey="shipping_state" form={form} set={set} />
+              <div className="col-span-2"><EditField label="Address Line 1" fieldKey="shipping_address_line_1" form={form} set={set} /></div>
+              <EditField label="City"    fieldKey="shipping_city"    form={form} set={set} />
+              <EditField label="State"   fieldKey="shipping_state"   form={form} set={set} />
               <EditField label="Pincode" fieldKey="shipping_pincode" form={form} set={set} />
             </div>
           </div>
-
         </div>
-
-        {/* Footer */}
-        <div className="flex gap-3 px-6 py-4 border-t border-gray-100">
-          <button onClick={onClose}
-            className="flex-1 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">
-            Cancel
-          </button>
-
-          <button onClick={handleSave} disabled={saving}
-            className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+        <div className="flex gap-3 px-6 py-4 border-t border-gray-100 bg-white">
+          <button onClick={onClose} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
             {saving ? "Saving..." : "Save Changes"}
           </button>
         </div>
-
       </div>
     </div>
   );
 }
 
+// ── Tab: Profile ──────────────────────────────────────────────────────────────
+function ProfileTab({ customer, onEdit }) {
+  const addr        = [customer.address_line_1, customer.city, customer.state, customer.pincode].filter(Boolean).join(", ");
+  const shippingAddr= [customer.shipping_address_line_1, customer.shipping_city, customer.shipping_state, customer.shipping_pincode].filter(Boolean).join(", ");
+  const name        = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
 
-function ProfileTab({ customer }) {
-  const addr = [customer.address_line_1, customer.city, customer.state, customer.pincode].filter(Boolean).join(", ");
-  const name = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
-  const shippingAddr = [
-  customer.shipping_address_line_1,
-  customer.shipping_city,
-  customer.shipping_state,
-  customer.shipping_pincode
-].filter(Boolean).join(", ");
   return (
-    <div className="grid grid-cols-2 gap-4">
-      <ProfileCard title="General Details" icon={Ico.Doc}>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
-          <PField label="Party Name"     value={name} />
-          <PField label="Party Type"     value={customer.party_type || "Customer"} />
-          <PField label="Mobile Number"  value={customer.contact_no_1 || customer.phone} />
-        </div>
-        <div className="mb-3"><PField label="Email" value={customer.email} /></div>
-        <PField label="Opening Balance" value={`₹${customer.opening_balance ?? 0}`} />
-      </ProfileCard>
-      <ProfileCard title="Business Details" icon={Ico.Office}>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
-          <PField label="GSTIN"      value={customer.gstin} />
-          <PField label="PAN Number" value={customer.pan_number} />
-        </div>
-        <div className="mb-3">
-          <p className="text-[11.5px] text-gray-400 mb-0.5">Billing Address</p>
-          <p className="text-[13px] font-medium text-gray-900">{addr || "-"}</p>
-        </div>
-        <div className="mb-3">
-          <p className="text-[11.5px] text-gray-400 mb-0.5">Shipping Address</p>
-         <p className="text-[13px] font-medium text-gray-900">
-  {shippingAddr || "-"}
-</p>
-        </div>
-      </ProfileCard>
-      <div className="border border-gray-200 rounded-xl p-5 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition col-span-1">
-        <div className="flex items-center gap-3">
-          <Ico.Bank />
-          <div>
-            <p className="text-[13px] font-semibold text-gray-700">Party Bank Details</p>
-            <p className="text-[12px] text-gray-500 mt-0.5">Add bank information to manage transactions with this party.</p>
-          </div>
-        </div>
-        <button className="w-7 h-7 rounded-full border border-gray-300 bg-white flex items-center justify-center text-gray-600 hover:bg-gray-100 flex-shrink-0"><Ico.Plus /></button>
+    <>
+      <div className="flex justify-end mb-4">
+        <button onClick={onEdit} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium border border-gray-300 rounded-md bg-white text-gray-600 hover:bg-gray-50 transition">
+          <Ico.Edit /> Edit Profile
+        </button>
       </div>
-    </div>
+      <div className="grid grid-cols-2 gap-4">
+        <ProfileCard title="General Details" icon={Ico.Doc}>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
+            <PField label="Party Name"    value={name} />
+            <PField label="Party Type"    value={customer.party_type || "Customer"} />
+            <PField label="Mobile Number" value={customer.contact_no_1 || customer.phone} />
+          </div>
+          <div className="mb-3"><PField label="Email" value={customer.email} /></div>
+          <PField label="Opening Balance" value={`₹${customer.opening_balance ?? 0}`} />
+        </ProfileCard>
+        <ProfileCard title="Business Details" icon={Ico.Office}>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 mb-3">
+            <PField label="GSTIN"      value={customer.gstin} />
+            <PField label="PAN Number" value={customer.pan_number} />
+          </div>
+          <div className="mb-3">
+            <p className="text-[11.5px] text-gray-400 mb-0.5">Billing Address</p>
+            <p className="text-[13px] font-medium text-gray-900">{addr || "-"}</p>
+          </div>
+          <div className="mb-3">
+            <p className="text-[11.5px] text-gray-400 mb-0.5">Shipping Address</p>
+            <p className="text-[13px] font-medium text-gray-900">{shippingAddr || "-"}</p>
+          </div>
+        </ProfileCard>
+      </div>
+    </>
   );
 }
 
@@ -805,28 +896,6 @@ function LedgerTab({ customer, customerId, showFilter, setShowFilter, selectedFi
   const [summary, setSummary] = useState({ totalReceivable: 0, dateRange: "" });
   const customerName = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
 
-
-  const sharePDF = async () => {
-  try {
-    const file = await generatePDFFile(
-      getLedgerExportData(),
-      ledgerColumns,
-      "Ledger"
-    );
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({
-        title: "Ledger PDF",
-        files: [file],
-      });
-    } else {
-      alert("Sharing not supported");
-    }
-  } catch (err) {
-    console.error(err);
-  }
-};
-
   useEffect(() => {
     if (!customerId) return;
     setLoading(true);
@@ -836,10 +905,10 @@ function LedgerTab({ customer, customerId, showFilter, setShowFilter, selectedFi
       axios.get(`http://localhost:8000/api/credit-note?customer_id=${customerId}`).catch(() => ({ data: { data: [] } })),
       axios.get(`http://localhost:8000/api/payment-in?customer_id=${customerId}`).catch(() => ({ data: { data: [] } })),
     ]).then(([salesRes, returnRes, creditRes, paymentRes]) => {
-      const sales    = (salesRes.data.data   || []).map(r => ({ _id: r._id, date: r.invoice_date,   voucher: "Sales Invoice",  number: r.invoice_no || r.sales_invoice_no || "—", debit: r.total_amount || 0, credit: 0 }));
-      const returns  = (returnRes.data.data  || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Sales Return",    number: r.return_no || "—",                          debit: 0, credit: r.total_amount || 0 }));
-      const credits  = (creditRes.data.data  || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Credit Note",     number: r.credit_note_no || r.return_no || "—",      debit: 0, credit: r.amount || r.total_amount || 0 }));
-      const payments = (paymentRes.data.data || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Payment In",      number: r.payment_no || "—",                         debit: 0, credit: r.amount || 0 }));
+      const sales    = (salesRes.data.data   || []).map(r => ({ _id: r._id, date: r.invoice_date,       voucher: "Sales Invoice", number: r.invoice_no || r.sales_invoice_no || "—", debit: r.total_amount || 0, credit: 0 }));
+      const returns  = (returnRes.data.data  || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Sales Return",  number: r.return_no || "—",                         debit: 0, credit: r.total_amount || 0 }));
+      const credits  = (creditRes.data.data  || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Credit Note",   number: r.credit_note_no || r.return_no || "—",     debit: 0, credit: r.amount || r.total_amount || 0 }));
+      const payments = (paymentRes.data.data || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Payment In",    number: r.payment_no || "—",                        debit: 0, credit: r.amount || 0 }));
 
       const all = [...sales, ...returns, ...credits, ...payments].sort((a, b) => new Date(a.date) - new Date(b.date));
       let balance = customer.opening_balance || 0;
@@ -855,56 +924,67 @@ function LedgerTab({ customer, customerId, showFilter, setShowFilter, selectedFi
   }, [customerId]);
 
   const VOUCHER_COLORS = {
-    "Sales Invoice":  "text-blue-700 bg-blue-50",
-    "Sales Return":   "text-orange-700 bg-orange-50",
-    "Credit Note":    "text-purple-700 bg-purple-50",
-    "Payment In":     "text-green-700 bg-green-50",
+    "Sales Invoice": "text-blue-700 bg-blue-50",
+    "Sales Return":  "text-orange-700 bg-orange-50",
+    "Credit Note":   "text-purple-700 bg-purple-50",
+    "Payment In":    "text-green-700 bg-green-50",
   };
 
   const cols = [
-    { key: "date",    label: "Date",       render: r => fmtDate(r.date) },
-    { key: "voucher", label: "Voucher",    render: r => <span className={`px-2 py-0.5 rounded text-xs font-medium ${VOUCHER_COLORS[r.voucher] || "text-gray-600 bg-gray-100"}`}>{r.voucher}</span> },
-    { key: "number",  label: "Ref No" },
-    { key: "debit",   label: "Debit (₹)",  render: r => r.debit  > 0 ? <span className="text-gray-800 font-medium tabular-nums">{fmt(r.debit)}</span>  : <span className="text-gray-300">—</span> },
-    { key: "credit",  label: "Credit (₹)", render: r => r.credit > 0 ? <span className="text-green-700 font-medium tabular-nums">{fmt(r.credit)}</span> : <span className="text-gray-300">—</span> },
+    { key: "date",           label: "Date",        render: r => fmtDate(r.date) },
+    { key: "voucher",        label: "Voucher",      render: r => <span className={`px-2 py-0.5 rounded text-xs font-medium ${VOUCHER_COLORS[r.voucher] || "text-gray-600 bg-gray-100"}`}>{r.voucher}</span> },
+    { key: "number",         label: "Ref No" },
+    { key: "debit",          label: "Debit (₹)",   render: r => r.debit  > 0 ? <span className="text-gray-800 font-medium tabular-nums">{fmt(r.debit)}</span>  : <span className="text-gray-300">—</span> },
+    { key: "credit",         label: "Credit (₹)",  render: r => r.credit > 0 ? <span className="text-green-700 font-medium tabular-nums">{fmt(r.credit)}</span> : <span className="text-gray-300">—</span> },
     { key: "runningBalance", label: "Balance (₹)", render: r => <span className={`font-semibold tabular-nums ${r.runningBalance < 0 ? "text-red-600" : r.runningBalance > 0 ? "text-gray-800" : "text-gray-400"}`}>{r.runningBalance < 0 ? `(${fmt(Math.abs(r.runningBalance))})` : fmt(r.runningBalance)}</span> },
   ];
 
-
-  const getLedgerExportData = () =>
-  entries.map((r) => ({
-    date: fmtDate(r.date),
+  const getLedgerExportData = () => entries.map(r => ({
+    date:    fmtDate(r.date),
     voucher: r.voucher,
-    ref: r.number,
-    debit: r.debit || 0,
-    credit: r.credit || 0,
+    ref:     r.number,
+    debit:   r.debit   || 0,
+    credit:  r.credit  || 0,
     balance: r.runningBalance || 0,
   }));
 
-const ledgerColumns = [
-  { key: "date", label: "Date" },
-  { key: "voucher", label: "Voucher" },
-  { key: "ref", label: "Ref No" },
-  { key: "debit", label: "Debit" },
-  { key: "credit", label: "Credit" },
-  { key: "balance", label: "Balance" },
-];
+  const ledgerColumns = [
+    { key: "date",    label: "Date"       },
+    { key: "voucher", label: "Voucher"    },
+    { key: "ref",     label: "Ref No"     },
+    { key: "debit",   label: "Debit"      },
+    { key: "credit",  label: "Credit"     },
+    { key: "balance", label: "Balance"    },
+  ];
 
-const handleLedgerExcel = () => {
-  downloadExcel(getLedgerExportData(), "Ledger");
-};
+  const handleLedgerExcel = async () => {
+    const file = await generateExcelFile(getLedgerExportData(), ledgerColumns, "Party Ledger", customer);
+    triggerDownload(file);
+  };
 
-const handleLedgerPDF = () => {
-  downloadPDF(getLedgerExportData(), ledgerColumns, "Ledger");
-};
+  const handleLedgerPDF = async () => {
+    const file = await generatePDFFile(getLedgerExportData(), ledgerColumns, "Party Ledger", customer);
+    triggerDownload(file);
+  };
+
+  const sharePDF = async () => {
+    try {
+      const file = await generatePDFFile(getLedgerExportData(), ledgerColumns, "Party Ledger", customer);
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ title: "Ledger PDF", files: [file] });
+      } else { alert("Sharing not supported"); }
+    } catch (err) { console.error(err); }
+  };
 
   return (
     <>
       <div className="flex gap-2.5 mb-4 flex-wrap">
         <DateFilter showFilter={showFilter} setShowFilter={setShowFilter} selectedFilter={selectedFilter} setSelectedFilter={setSelectedFilter} hoveredFilter={hoveredFilter} setHoveredFilter={setHoveredFilter} filterRef={filterRef} />
-     <ActionBtn icon={Ico.Download} label="Excel" onClick={handleLedgerExcel} />
-<ActionBtn icon={Ico.Print} label="PDF" onClick={handleLedgerPDF} />
-        <button onClick={sharePDF} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition"><Ico.Share /> Share <Ico.Chevron /></button>
+        <ActionBtn icon={Ico.Download} label="Excel" onClick={handleLedgerExcel} />
+        <ActionBtn icon={Ico.Print}    label="PDF"   onClick={handleLedgerPDF}   />
+        <button onClick={sharePDF} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition">
+          <Ico.Share /> Share <Ico.Chevron />
+        </button>
       </div>
       <div className="border border-gray-200 rounded-xl overflow-visible">
         <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-start">
@@ -927,7 +1007,8 @@ const handleLedgerPDF = () => {
           <table className="w-full text-[13px]"><tbody>
             <tr className="bg-gray-50 border-b border-gray-200">
               <td className="px-4 py-3 text-gray-400 italic" colSpan={3}>Opening Balance</td>
-              <td className="px-4 py-3 text-gray-300">—</td><td className="px-4 py-3 text-gray-300">—</td>
+              <td className="px-4 py-3 text-gray-300">—</td>
+              <td className="px-4 py-3 text-gray-300">—</td>
               <td className="px-4 py-3 font-semibold text-gray-700 tabular-nums">{fmt(customer.opening_balance || 0)}</td>
             </tr>
           </tbody></table>
@@ -939,30 +1020,9 @@ const handleLedgerPDF = () => {
 }
 
 // ── Tab: Payments ─────────────────────────────────────────────────────────────
-function PaymentsTab({ customerId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+function PaymentsTab({ customerId, customer, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading]   = useState(true);
-
-  const sharePDF = async () => {
-  try {
-    const file = await generatePDFFile(
-      getPaymentExportData(),
-      paymentColumns,
-      "Payments"
-    );
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({
-        title: "Payments PDF",
-        files: [file],
-      });
-    } else {
-      alert("Sharing not supported");
-    }
-  } catch (err) {
-    console.error(err);
-  }
-};
 
   useEffect(() => {
     if (!customerId) return;
@@ -973,7 +1033,6 @@ function PaymentsTab({ customerId, showFilter, setShowFilter, selectedFilter, se
       .finally(() => setLoading(false));
   }, [customerId]);
 
-  // Refresh when payment received from invoices tab
   useEffect(() => {
     const handle = () => {
       setLoading(true);
@@ -987,43 +1046,69 @@ function PaymentsTab({ customerId, showFilter, setShowFilter, selectedFilter, se
   }, [customerId]);
 
   const cols = [
+    {
+  key: "sr_no",
+  label: "Sr No",
+  render: (_, index) => index + 1,
+},
+
     { key: "date",         label: "Date",         render: r => fmtDate(r.date || r.payment_date) },
-    { key: "payment_no",   label: "Payment No",   render: r => r.payment_no || r.reference_no || "—" },
-    { key: "amount",       label: "Amount",       render: r => fmt(r.amount || r.total_amount) },
-    { key: "payment_mode", label: "Payment Mode", render: r => r.payment_mode || "—" },
+
+    { key: "amount",       label: "Amount",        render: r => fmt(r.amount || r.total_amount) },
+{
+  key: "payment_mode",
+  label: "Payment Mode",
+  render: r =>
+    r.payment_mode ||
+    r.paymentMethod ||
+    r.method ||
+    "Cash",
+},
     { key: "status",       label: "Status",       render: () => <span className="px-2 py-[3px] text-xs rounded-full bg-green-100 text-green-700 border border-green-300">Received</span> },
   ];
 
-const getPaymentExportData = () =>
-  payments.map((r) => ({
-    date: fmtDate(r.date || r.payment_date),
+  const getPaymentExportData = () => payments.map(r => ({
+    date:       fmtDate(r.date || r.payment_date),
     payment_no: r.payment_no || "-",
-    amount: r.amount || 0,
-    mode: r.payment_mode || "-",
+    amount:     r.amount || 0,
+    mode:       r.payment_mode || "-",
   }));
 
-const paymentColumns = [
-  { key: "date", label: "Date" },
-  { key: "payment_no", label: "Payment No" },
-  { key: "amount", label: "Amount" },
-  { key: "mode", label: "Mode" },
-];
+  const paymentColumns = [
+    { key: "date",       label: "Date"       },
+    { key: "payment_no", label: "Payment No" },
+    { key: "amount",     label: "Amount"     },
+    { key: "mode",       label: "Mode"       },
+  ];
 
-const handlePaymentExcel = () => {
-  downloadExcel(getPaymentExportData(), "Payments");
-};
+  const handlePaymentExcel = async () => {
+    const file = await generateExcelFile(getPaymentExportData(), paymentColumns, "Payment History", customer);
+    triggerDownload(file);
+  };
 
-const handlePaymentPDF = () => {
-  downloadPDF(getPaymentExportData(), paymentColumns, "Payments");
-};
+  const handlePaymentPDF = async () => {
+    const file = await generatePDFFile(getPaymentExportData(), paymentColumns, "Payment History", customer);
+    triggerDownload(file);
+  };
+
+  const sharePDF = async () => {
+    try {
+      const file = await generatePDFFile(getPaymentExportData(), paymentColumns, "Payment History", customer);
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ title: "Payments PDF", files: [file] });
+      } else { alert("Sharing not supported"); }
+    } catch (err) { console.error(err); }
+  };
 
   return (
     <>
       <div className="flex gap-2.5 mb-4 flex-wrap">
         <DateFilter showFilter={showFilter} setShowFilter={setShowFilter} selectedFilter={selectedFilter} setSelectedFilter={setSelectedFilter} hoveredFilter={hoveredFilter} setHoveredFilter={setHoveredFilter} filterRef={filterRef} />
-     <ActionBtn icon={Ico.Download} label="Excel" onClick={handlePaymentExcel} />
-<ActionBtn icon={Ico.Print} label="PDF" onClick={handlePaymentPDF} />
-        <button onClick={sharePDF} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition"><Ico.Share /> Share <Ico.Chevron /></button>
+        <ActionBtn icon={Ico.Download} label="Excel" onClick={handlePaymentExcel} />
+        <ActionBtn icon={Ico.Print}    label="PDF"   onClick={handlePaymentPDF}   />
+        <button onClick={sharePDF} className="flex items-center gap-1.5 px-3 py-[7px] text-[13px] font-medium text-gray-600 border border-gray-300 rounded-md bg-white hover:bg-gray-50 transition">
+          <Ico.Share /> Share <Ico.Chevron />
+        </button>
       </div>
       {loading ? <p className="text-sm text-gray-400 py-8 text-center">Loading...</p> : <TableView cols={cols} rows={payments} />}
     </>
@@ -1032,11 +1117,11 @@ const handlePaymentPDF = () => {
 
 // ── Root ──────────────────────────────────────────────────────────────────────
 export default function CustomerDetails() {
-  const { id }     = useParams();
-  const navigate   = useNavigate();
+  const { id }   = useParams();
+  const navigate = useNavigate();
   const [customer, setCustomer]   = useState(null);
   const [activeTab, setActiveTab] = useState("invoices");
-  const [showEdit, setShowEdit] = useState(false);
+  const [showEdit, setShowEdit]   = useState(false);
 
   const [filters, setFilters] = useState({
     invoices: { show: false, selected: "Last 365 Days", hovered: null },
@@ -1044,29 +1129,14 @@ export default function CustomerDetails() {
     ledger:   { show: false, selected: "Last 365 Days", hovered: null },
   });
 
-const handleDelete = async () => {
-  const confirmDelete = window.confirm(
-    "Are you sure you want to delete this customer permanently?"
-  );
-
-  if (!confirmDelete) return;
-
-  try {
-    const res = await axios.delete(
-      `http://localhost:8000/api/customers/${id}`
-    );
-
-    if (res.data.success) {
-      alert("Customer deleted successfully");
-      navigate(-1);
-    } else {
-      alert("Failed to delete customer");
-    }
-  } catch (err) {
-    console.error(err);
-    alert("Server error while deleting");
-  }
-};
+  const handleDelete = async () => {
+    if (!window.confirm("Are you sure you want to delete this customer permanently?")) return;
+    try {
+      const res = await axios.delete(`http://localhost:8000/api/customers/${id}`);
+      if (res.data.success) { alert("Customer deleted successfully"); navigate(-1); }
+      else { alert("Failed to delete customer"); }
+    } catch (err) { console.error(err); alert("Server error while deleting"); }
+  };
 
   const updateFilter = (tab, key, value) => setFilters(prev => ({ ...prev, [tab]: { ...prev[tab], [key]: value } }));
   const filterRef = useRef(null);
@@ -1118,11 +1188,6 @@ const handleDelete = async () => {
           <span className="text-[17px] font-semibold text-gray-900">{customerName}</span>
         </div>
         <div className="flex items-center gap-2">
-<ActionBtn
-  icon={Ico.Edit}
-  label="Edit"
-  onClick={() => setShowEdit(true)}
-/>
           <ActionBtn icon={Ico.Trash} danger square onClick={handleDelete} />
         </div>
       </div>
@@ -1147,45 +1212,43 @@ const handleDelete = async () => {
       <div className="p-6">
         {activeTab === "invoices" && (
           <TransactionsTab
-            customerId={id}
-              customerName={customerName}
-            showFilter={filters.invoices.show}       setShowFilter={v => updateFilter("invoices","show",v)}
+            customerId={id} customerName={customerName} customer={customer}
+            showFilter={filters.invoices.show}        setShowFilter={v => updateFilter("invoices","show",v)}
             selectedFilter={filters.invoices.selected} setSelectedFilter={v => updateFilter("invoices","selected",v)}
-            hoveredFilter={filters.invoices.hovered}  setHoveredFilter={v => updateFilter("invoices","hovered",v)}
+            hoveredFilter={filters.invoices.hovered}   setHoveredFilter={v => updateFilter("invoices","hovered",v)}
             filterRef={filterRef}
           />
         )}
         {activeTab === "payments" && (
           <PaymentsTab
-            customerId={id}
-            showFilter={filters.payments.show}       setShowFilter={v => updateFilter("payments","show",v)}
+            customerId={id} customer={customer}
+            showFilter={filters.payments.show}        setShowFilter={v => updateFilter("payments","show",v)}
             selectedFilter={filters.payments.selected} setSelectedFilter={v => updateFilter("payments","selected",v)}
-            hoveredFilter={filters.payments.hovered}  setHoveredFilter={v => updateFilter("payments","hovered",v)}
+            hoveredFilter={filters.payments.hovered}   setHoveredFilter={v => updateFilter("payments","hovered",v)}
             filterRef={filterRef}
           />
         )}
-        {activeTab === "profile" && <ProfileTab customer={customer} />}
+        {activeTab === "profile" && (
+          <ProfileTab customer={customer} onEdit={() => setShowEdit(true)} />
+        )}
         {activeTab === "ledger" && (
           <LedgerTab
-            customer={customer}
-            customerId={id}
-            showFilter={filters.ledger.show}       setShowFilter={v => updateFilter("ledger","show",v)}
+            customer={customer} customerId={id}
+            showFilter={filters.ledger.show}        setShowFilter={v => updateFilter("ledger","show",v)}
             selectedFilter={filters.ledger.selected} setSelectedFilter={v => updateFilter("ledger","selected",v)}
-            hoveredFilter={filters.ledger.hovered}  setHoveredFilter={v => updateFilter("ledger","hovered",v)}
+            hoveredFilter={filters.ledger.hovered}   setHoveredFilter={v => updateFilter("ledger","hovered",v)}
             filterRef={filterRef}
           />
         )}
       </div>
+
       {showEdit && (
-  <EditCustomerModal
-    customer={customer}
-    onClose={() => setShowEdit(false)}
-    onSave={(updated) => {
-      setCustomer(updated);
-      setShowEdit(false);
-    }}
-  />
-)}
+        <EditCustomerModal
+          customer={customer}
+          onClose={() => setShowEdit(false)}
+          onSave={(updated) => { setCustomer(updated); setShowEdit(false); }}
+        />
+      )}
     </div>
   );
 }

@@ -48,7 +48,7 @@ state_code: {
 },
   status: {
     type: String,
-    enum: ["pending", "in_progress", "completed", 'Paid', 'Unpaid', 'Partial Paid'],
+enum: ["pending", "in_progress", "completed", "Paid", "Unpaid", "Partial"],
     default: "Unpaid",
   },
   gst: { type: Boolean, default: false },

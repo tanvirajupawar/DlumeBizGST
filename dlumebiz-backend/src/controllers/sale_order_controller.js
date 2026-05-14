@@ -85,7 +85,7 @@ generateInvoice: async function (req, res) {
         if (order.advance_amount >= order.total_amount) {
           order.status = "Paid";
         } else {
-          order.status = "Partial Paid";
+          order.status = "Partial";
         }
       } else {
         order.status = "Unpaid";
@@ -457,7 +457,7 @@ if (product) {
                 if (updateData.advance_amount >= updateData.total_amount) {
                     updateData.status = "Paid";
                 } else {
-                    updateData.status = "Partial Paid";
+                    updateData.status = "Partial";
                 }
             } else {
                 updateData.paid_amount = 0;
@@ -658,7 +658,7 @@ if (product) {
                     if (order.paid_amount >= order.total_amount) {
                         order.status = "Paid";
                     } else if (order.paid_amount > 0) {
-                        order.status = "Partial Paid";
+                        order.status = "Partial";
                     } else {
                         order.status = "Unpaid";
                     }
