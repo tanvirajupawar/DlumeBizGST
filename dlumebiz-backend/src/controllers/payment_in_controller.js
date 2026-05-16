@@ -27,7 +27,13 @@ const payments = await SaleReceipt.find(filter)
 // ── CREATE PAYMENT-IN ──
 exports.createPaymentIn = async (req, res) => {
   try {
-    const { customer_id, amount, payment_mode, remark, invoice_ids } = req.body;
+   const {
+  customer_id,
+  amount,
+  payment_method,
+  remarks,
+  invoice_ids
+} = req.body;
 
     if (!customer_id || !amount) {
       return res.status(400).json({
@@ -116,13 +122,15 @@ const payment_no = `RCPT-${String(count + 1).padStart(4, "0")}`;
 const payment = await SaleReceipt.create({
   client_id: customer_id,
 
-  // ✅ ADD THIS
+    sale_order_id: invoices[0]?._id || null, 
   invoice_no: invoices[0]?.invoice_no || "",
 
   amount: received,
-  payment_mode: payment_mode || "Cash",
-  remark: remark || "",
-  payment_no,
+
+  payment_method: payment_method || "Cash",
+
+  remarks: remarks || "",
+
   date: new Date(),
 });
 

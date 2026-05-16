@@ -311,6 +311,7 @@ export default function ItemsTable({
   itemTaxBreakup,
   itemTotal,
   isSales,
+  isGSTUser,
 }) {
   const [showItemModal, setShowItemModal] = useState(false);
   const [showScanner,   setShowScanner]   = useState(false);
@@ -443,22 +444,46 @@ export default function ItemsTable({
 
       {/* ── Items Table ── */}
       <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: "12px" }}>
-        <colgroup>
-          {Object.values(colWidths).map((w, i) => <col key={i} style={{ width: w }} />)}
-        </colgroup>
+  <colgroup>
+  <col style={{ width: "40px" }} />
+  <col style={{ width: "22%" }} />
+  <col style={{ width: "12%" }} />
+
+  {isGSTUser && <col style={{ width: "8%" }} />}
+
+  <col style={{ width: "8%" }} />
+  <col style={{ width: "6%" }} />
+  <col style={{ width: "12%" }} />
+  <col style={{ width: "8%" }} />
+
+  {isGSTUser && <col style={{ width: "10%" }} />}
+  {isGSTUser && <col style={{ width: "7%" }} />}
+  {isGSTUser && <col style={{ width: "9%" }} />}
+
+  <col style={{ width: "10%" }} />
+  <col style={{ width: "40px" }} />
+</colgroup>
         <thead>
           <tr>
             <th style={thStyle("center")}>#</th>
             <th style={thStyle()}>Item Name</th>
             <th style={thStyle()}>Type</th>
-            <th style={thStyle()}>HSN</th>
+          {isGSTUser && (
+  <th style={thStyle()}>HSN</th>
+)}
             <th style={thStyle("center")}>Unit</th>
             <th style={thStyle("center")}>Qty</th>
             <th style={thStyle("right")}>{isSales ? "Sale Price (₹)" : "Purchase Price (₹)"}</th>
             <th style={thStyle("right")}>Disc (₹)</th>
-            <th style={thStyle("right")}>Taxable (₹)</th>
-            <th style={thStyle("center")}>GST %</th>
-            <th style={thStyle("right")}>Tax (₹)</th>
+           {isGSTUser && (
+  <th style={thStyle("right")}>Taxable (₹)</th>
+)}
+          {isGSTUser && (
+  <th style={thStyle("center")}>GST %</th>
+)}
+        {isGSTUser && (
+  <th style={thStyle("right")}>Tax (₹)</th>
+)}
             <th style={thStyle("right")}>Total (₹)</th>
             <th style={thStyle()}></th>
           </tr>
@@ -487,16 +512,20 @@ export default function ItemsTable({
                   </select>
                 </td>
 
-                {/* HSN */}
-                <td style={tdStyle()}>
-                  <HSNSearchDropdown
-                    value={item.hsn}
-                    onSelect={(hsnItem) => {
-                      updateItem(i, "hsn",     hsnItem.code);
-                      updateItem(i, "gstRate", hsnItem.gst);
-                    }}
-                  />
-                </td>
+           {isGSTUser && (
+  <>
+    {/* HSN */}
+    <td style={tdStyle()}>
+      <HSNSearchDropdown
+        value={item.hsn}
+        onSelect={(hsnItem) => {
+          updateItem(i, "hsn", hsnItem.code);
+          updateItem(i, "gstRate", hsnItem.gst);
+        }}
+      />
+    </td>
+  </>
+)}
 
                 {/* Unit */}
                 <td style={tdStyle("center")}>
@@ -533,23 +562,52 @@ export default function ItemsTable({
                     onBlur={(e)  => (e.target.style.borderColor = "#e5e7eb")} />
                 </td>
 
-                {/* Taxable */}
-                <td style={tdStyle("right", { fontWeight: 600, color: "#374151", fontSize: "12px" })}>
-                  {itemTaxable(item).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                </td>
+              {isGSTUser && (
+  <td style={tdStyle("right", {
+    fontWeight: 600,
+    color: "#374151",
+    fontSize: "12px"
+  })}>
+    {itemTaxable(item).toLocaleString("en-IN", {
+      minimumFractionDigits: 2
+    })}
+  </td>
+)}
 
-                {/* GST % */}
-                <td style={tdStyle("center")}>
-                  <select value={item.gstRate ?? 18} onChange={(e) => updateItem(i, "gstRate", Number(e.target.value))}
-                    style={{ ...inputStyle, padding: "5px 4px", fontSize: "11.5px", appearance: "none", textAlign: "center" }}>
-                    {gstOptions.map((r) => <option key={r} value={r}>{r}%</option>)}
-                  </select>
-                </td>
+           {isGSTUser && (
+  <td style={tdStyle("center")}>
+    <select
+      value={item.gstRate ?? 18}
+      onChange={(e) =>
+        updateItem(i, "gstRate", Number(e.target.value))
+      }
+      style={{
+        ...inputStyle,
+        padding: "5px 4px",
+        fontSize: "11.5px",
+        appearance: "none",
+        textAlign: "center",
+      }}
+    >
+      {gstOptions.map((r) => (
+        <option key={r} value={r}>
+          {r}%
+        </option>
+      ))}
+    </select>
+  </td>
+)}
 
-                {/* Tax */}
-                <td style={tdStyle("right", { color: "#374151", fontSize: "12px" })}>
-                  {taxTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                </td>
+               {isGSTUser && (
+  <td style={tdStyle("right", {
+    color: "#374151",
+    fontSize: "12px"
+  })}>
+    {taxTotal.toLocaleString("en-IN", {
+      minimumFractionDigits: 2
+    })}
+  </td>
+)}
 
                 {/* Total */}
                 <td style={tdStyle("right", { fontWeight: 700, color: "#1e3a5f", fontSize: "12px" })}>

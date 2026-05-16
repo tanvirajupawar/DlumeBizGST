@@ -27,151 +27,145 @@ const printer = new PdfPrinter(fonts);
 
 const saleOrderControler = {
 
-  // ✅ GENERATE INVOICE (USED BY FRONTEND)
-generateInvoice: async function (req, res) {
+
+
+// ✅ CREATE SALE ORDER
+create: async function (req, res) {
   try {
-    // Only look at orders that actually have a valid I-XXXXX invoice number
-    const lastOrder = await SaleOrderModel.findOne({
-      invoice_no: { $regex: /^I-\d+$/ }
-    }).sort({ _id: -1 });
 
-    let nextNumber = 1;
+    const data = req.body;
+    const details = data.details || [];
 
-    if (lastOrder && lastOrder.invoice_no) {
-      const parts = lastOrder.invoice_no.split("-");
-      const lastNo = parseInt(parts[1]);
-      if (!isNaN(lastNo)) {
-        nextNumber = lastNo + 1;
+
+
+    // ✅ CREATE ORDER
+    const order = new SaleOrderModel(data);
+
+    // ✅ INITIAL PAID AMOUNT
+    order.paid_amount = Number(
+      order.advance_amount || 0
+    );
+
+    // ✅ SAVE ORDER
+    await order.save();
+
+    // ✅ SAVE DETAILS + UPDATE STOCK
+    if (details.length > 0) {
+
+    const detailDocs = await SaleDetail.insertMany(
+  details.map((d) => ({
+    ...d,
+    sales_order_id: order._id,
+    company_id: order.company_id,  
+  }))
+);
+
+      for (const d of detailDocs) {
+
+        const qty = Number(d.qty || 0);
+
+        // ✅ STOCK MANAGEMENT
+    if (
+  !d.product_id ||
+  !mongoose.Types.ObjectId.isValid(d.product_id)
+) {
+  continue;
+}
+
+let stock = await StockManagementModel.findOne({
+  product_id: d.product_id,
+          company_id: order.company_id,
+        });
+
+        if (stock) {
+
+          stock.out =
+            Number(stock.out || 0) + qty;
+
+          stock.total_stock = Math.max(
+            0,
+            Number(stock.total_stock || 0) - qty
+          );
+
+          await stock.save();
+
+        } else {
+
+          await StockManagementModel.create({
+            product_id: d.product_id,
+            company_id: order.company_id,
+            in: 0,
+            out: qty,
+            total_stock: 0,
+          });
+        }
+
+        // ✅ PRODUCT UPDATE
+     let product = null;
+
+if (
+  d.product_id &&
+  mongoose.Types.ObjectId.isValid(d.product_id)
+) {
+  product =
+    await productModel.findById(d.product_id);
+}
+
+        if (product) {
+
+          product.qty = Math.max(
+            0,
+            Number(product.qty || 0) - qty
+          );
+
+          product.stock_out =
+            Number(product.stock_out || 0) + qty;
+
+          product.total = product.qty;
+
+          await product.save();
+        }
       }
     }
 
-    const invoiceNo = `I-${String(nextNumber).padStart(5, "0")}`;
+    // ✅ FETCH COMPLETE INVOICE
+    const invoice =
+      await SaleOrderModel.findById(order._id)
+
+        .populate({
+          path: "company_id",
+        })
+
+        .populate({
+          path: "client_id",
+        })
+
+        .populate({
+          path: "details",
+          populate: [
+            {
+              path: "product_id",
+            },
+          ],
+        });
 
     return res.json({
       success: true,
-      invoice_no: invoiceNo
+      data: invoice,
+      message: "Sale Order Created Successfully",
     });
 
   } catch (error) {
-    console.error("generateInvoice ERROR:", error.message); // ← check terminal for exact cause
+
+    console.error("CREATE SALE ERROR:", error);
+
     return res.status(500).json({
       success: false,
-      message: "Error generating invoice number",
-      error: error.message
+      message: "Server Error",
+      error: error.message || error,
     });
   }
 },
-
-  // ✅ CREATE SALE ORDER
-  create: async function (req, res) {
-    try {
-      const data = req.body;
-      const details = data.details;
-
-      // ✅ USE INVOICE FROM FRONTEND (DO NOT GENERATE AGAIN)
-      if (!data.invoice_no) {
-        return res.status(400).json({
-          success: false,
-          message: "Invoice number is required"
-        });
-      }
-
-      const order = new SaleOrderModel(data);
-
-      // ✅ PAYMENT STATUS LOGIC
-      if (order.advance_amount > 0) {
-        order.paid_amount = order.advance_amount;
-
-        if (order.advance_amount >= order.total_amount) {
-          order.status = "Paid";
-        } else {
-          order.status = "Partial";
-        }
-      } else {
-        order.status = "Unpaid";
-      }
-
-      await order.save();
-
-      // ✅ SAVE DETAILS + STOCK UPDATE
-      if (Array.isArray(details) && details.length > 0) {
-        let detailDocs = await SaleDetail.insertMany(
-          details.map(d => ({
-            ...d,
-            sales_order_id: order._id,
-          }))
-        );
-
-        for (let d of detailDocs) {
-          let stock = await StockManagementModel.findOne({
-            product_id: d.product_id,
-            company_id: order.company_id
-          });
-
-          const previousStock = stock ? stock.total_stock : 0;
-          const qty = parseInt(d.qty);
-
-  if (stock) {
-
-  stock.out += qty;
-  stock.total_stock -= qty;
-
-  await stock.save();
-
-} else {
-
-  await StockManagementModel.create({
-    product_id: d.product_id,
-    company_id: order.company_id,
-    in: 0,
-    out: qty,
-    total_stock: Math.max(0, previousStock - qty),
-  });
-}
-
-// ✅ PRODUCT UPDATE
-const product = await productModel.findById(d.product_id);
-
-if (product) {
-
-  product.qty = Math.max(
-    0,
-    (product.qty || 0) - qty
-  );
-
-  product.stock_out =
-    (product.stock_out || 0) + qty;
-
-  product.total = product.qty;
-
-  await product.save();
-}
-        }
-      }
-
-      // ✅ FETCH FULL INVOICE
-      const invoice = await SaleOrderModel.findById(order._id)
-        .populate({ path: 'company_id' })
-        .populate({ path: 'client_id' })
-        .populate({
-          path: 'details',
-          populate: [{ path: 'product_id' }],
-        });
-
-      return res.json({
-        success: true,
-        data: invoice,
-        message: "Sale Order Created Successfully"
-      });
-
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: "Server Error",
-        error: error.message || error
-      });
-    }
-  },
 
 
 fetch: async function (req, res) {
@@ -271,24 +265,8 @@ fetch: async function (req, res) {
   }
 },
 
-    // solved: async function (req, res) {
-    //     try {
-    
+  
 
-
-
-    //             return res.json({ success: true, data:orders});  
-            
-    //     } catch (error) {
-    //          return res.status(500).json({
-    //             success: false,
-    //             message: "Server Error",
-    //             error: error.message || error
-    //         });
-            
-    //     }
-        
-    // },
 
    
 
@@ -383,304 +361,476 @@ fetch: async function (req, res) {
         
     },
 
-    delete: async function (req, res) {
-        try {
-        const id = req.params.id;
+  delete: async function (req, res) {
 
-        const deleted = await SaleOrderModel.findByIdAndDelete(id);
+  try {
 
-        if (!deleted) {
-            return res
-            .status(404)
-            .json({ success: false, message: "Sale Order not found" });
+    const id = req.params.id;
+
+    // ✅ FIND ORDER FIRST
+    const order =
+      await SaleOrderModel.findById(id);
+
+    // ✅ NOT FOUND
+    if (!order) {
+
+      return res.status(404).json({
+        success: false,
+        message: "Sale Order not found",
+      });
+    }
+
+    // ✅ BLOCK DELETE IF PAYMENT EXISTS
+    if (Number(order.paid_amount || 0) > 0) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot delete paid or partially paid invoice",
+      });
+    }
+
+    // ✅ FETCH DETAILS BEFORE DELETE
+    const details =
+      await SaleDetail.find({
+        sales_order_id: id,
+      });
+
+    // ✅ REVERSE STOCK
+    for (const d of details) {
+
+      const qty = Number(d.qty || 0);
+
+      // ✅ STOCK MANAGEMENT
+      const stock =
+        await StockManagementModel.findOne({
+          product_id: d.product_id,
+          company_id: order.company_id,
+        });
+
+      if (stock) {
+
+        stock.out = Math.max(
+          0,
+          Number(stock.out || 0) - qty
+        );
+
+        stock.total_stock =
+          Number(stock.total_stock || 0) + qty;
+
+        await stock.save();
+      }
+
+      // ✅ PRODUCT UPDATE
+      const product =
+        await productModel.findById(d.product_id);
+
+      if (product) {
+
+        product.qty =
+          Number(product.qty || 0) + qty;
+
+        product.stock_out = Math.max(
+          0,
+          Number(product.stock_out || 0) - qty
+        );
+
+        product.total = product.qty;
+
+        await product.save();
+      }
+    }
+
+    // ✅ DELETE DETAILS
+    await SaleDetail.deleteMany({
+      sales_order_id: id,
+    });
+
+    // ✅ DELETE ORDER
+    await SaleOrderModel.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Sale Order deleted successfully",
+    });
+
+  } catch (error) {
+
+    console.error(
+      "DELETE SALE ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message || error,
+    });
+  }
+},
+// ✅ UPDATE SALE ORDER
+update: async function (req, res) {
+
+  try {
+
+    const id = req.params.id;
+
+    const updateData = req.body;
+
+    const details = updateData.details || [];
+
+    // ❌ NEVER RESET PAID AMOUNT / STATUS HERE
+    // Payment flow handles that separately
+
+    // ✅ GET OLD ORDER
+    const existingOrder =
+      await SaleOrderModel.findById(id);
+
+    if (!existingOrder) {
+
+      return res.status(404).json({
+        success: false,
+        message: "Sale Order not found",
+      });
+    }
+
+    // ✅ KEEP EXISTING PAYMENT DATA
+    updateData.paid_amount =
+      existingOrder.paid_amount || 0;
+
+    updateData.advance_amount =
+      existingOrder.advance_amount || 0;
+
+    // ✅ UPDATE ORDER
+    const updatedOrder =
+      await SaleOrderModel.findByIdAndUpdate(
+        id,
+        updateData,
+        {
+          new: true,
+          runValidators: true,
+        }
+      );
+
+    // ✅ REVERSE OLD STOCK
+    const oldDetails =
+      await SaleDetail.find({
+        sales_order_id: id,
+      });
+
+    for (const d of oldDetails) {
+
+      const qty = Number(d.qty || 0);
+
+      // ✅ STOCK MANAGEMENT
+      const stock =
+        await StockManagementModel.findOne({
+          product_id: d.product_id,
+          company_id: updatedOrder.company_id,
+        });
+
+      if (stock) {
+
+        stock.out = Math.max(
+          0,
+          Number(stock.out || 0) - qty
+        );
+
+        stock.total_stock =
+          Number(stock.total_stock || 0) + qty;
+
+        await stock.save();
+      }
+
+      // ✅ PRODUCT UPDATE
+  let product = null;
+
+if (
+  d.product_id &&
+  mongoose.Types.ObjectId.isValid(d.product_id)
+) {
+  product =
+    await productModel.findById(d.product_id);
+}
+
+      if (product) {
+
+        product.qty =
+          Number(product.qty || 0) + qty;
+
+        product.stock_out = Math.max(
+          0,
+          Number(product.stock_out || 0) - qty
+        );
+
+        product.total = product.qty;
+
+        await product.save();
+      }
+    }
+
+    // ✅ DELETE OLD DETAILS
+    await SaleDetail.deleteMany({
+      sales_order_id: id,
+    });
+
+    // ✅ ADD NEW DETAILS
+    if (details.length > 0) {
+
+const detailDocs = await SaleDetail.insertMany(
+  details.map((d) => ({
+    ...d,
+    sales_order_id: updatedOrder._id,
+    company_id: updatedOrder.company_id,  
+  }))
+);
+
+      for (const d of detailDocs) {
+
+        const qty = Number(d.qty || 0);
+
+        // ✅ STOCK
+    // ✅ STOCK
+if (
+  !d.product_id ||
+  !mongoose.Types.ObjectId.isValid(d.product_id)
+) {
+  continue;
+}
+
+let stock =
+  await StockManagementModel.findOne({
+    product_id: d.product_id,
+    company_id: updatedOrder.company_id,
+  });
+
+        if (stock) {
+
+          stock.out =
+            Number(stock.out || 0) + qty;
+
+          stock.total_stock = Math.max(
+            0,
+            Number(stock.total_stock || 0) - qty
+          );
+
+          await stock.save();
+
         } else {
-            if (deleted._id) {
-                const details = await SaleDetail.find({ sales_order_id: id });
 
-                  for (let d of details) {
-                    const qty = parseInt(d.qty) || 0;
-
-                    const stock = await StockManagementModel.findOne({
-                        product_id: d.product_id,
-                        company_id: deleted.company_id
-                    });
-
-                    if (stock) {
-                        stock.out = parseInt(stock.out) - qty;
-                        if (stock.out < 0) stock.out = 0;
-
-                        stock.total_stock = parseInt(stock.total_stock) + qty;
-                        if (stock.total_stock < 0) stock.total_stock = 0;
-
-                        await stock.save();
-                    }
-
-                    const product = await productModel.findById(d.product_id);
-
-if (product) {
-
-  product.qty =
-    (product.qty || 0) + qty;
-
-  product.stock_out = Math.max(
-    0,
-    (product.stock_out || 0) - qty
-  );
-
-  product.total = product.qty;
-
-  await product.save();
-}
-                }
-                await SaleDetail.deleteMany({ sales_order_id: id });
-            }
-            return res.status(200).json({ message: "Sale Order deleted successfully" });
-        }     
-
-       
-        } catch (error) {
-            return res.status(500).json({
-                success: false,
-                message: "Server Error",
-                error: error.message || error,
-            });
+          await StockManagementModel.create({
+            product_id: d.product_id,
+            company_id: updatedOrder.company_id,
+            in: 0,
+            out: qty,
+            total_stock: 0,
+          });
         }
-    },
-    update: async function (req, res) {
-        try {
-            const id = req.params.id;
-            const updateData = req.body;
-             const details = updateData.details;
 
-            if (updateData.advance_amount > 0) {
-                updateData.paid_amount = updateData.advance_amount;
-                if (updateData.advance_amount >= updateData.total_amount) {
-                    updateData.status = "Paid";
-                } else {
-                    updateData.status = "Partial";
-                }
-            } else {
-                updateData.paid_amount = 0;
-                updateData.advance_amount = 0;
-                updateData.status = "Unpaid";
-            }
-           
+  // ✅ PRODUCT
+let product = null;
 
-            const updetedOrder = await SaleOrderModel.findByIdAndUpdate(
-            id,
-            updateData,
+if (
+  d.product_id &&
+  mongoose.Types.ObjectId.isValid(d.product_id)
+) {
+  product =
+    await productModel.findById(d.product_id);
+}
+
+        if (product) {
+
+          product.qty = Math.max(
+            0,
+            Number(product.qty || 0) - qty
+          );
+
+          product.stock_out =
+            Number(product.stock_out || 0) + qty;
+
+          product.total = product.qty;
+
+          await product.save();
+        }
+      }
+    }
+
+    // ✅ FINAL UPDATED ORDER
+    const finalOrder =
+      await SaleOrderModel.findById(id)
+
+        .populate({
+          path: "company_id",
+        })
+
+        .populate({
+          path: "client_id",
+        })
+
+        .populate({
+          path: "details",
+          populate: [
             {
-                new: true,
-                runValidators: true,
-            }
-            );
+              path: "product_id",
+            },
+          ],
+        });
 
-            if (!updetedOrder) {
-            return res
-                .status(404)
-                .json({ success: false, message: "Sale Order not found" });
-            }
+    return res.json({
+      success: true,
+      data: finalOrder,
+      message: "Sale Order Updated Successfully",
+    });
 
-            const old = await SaleDetail.find({ sales_order_id: id });
+  } catch (error) {
 
-             for (let d of old) {
-                const qty = parseInt(d.qty) || 0;
+    console.error("UPDATE SALE ERROR:", error);
 
-                const stock = await StockManagementModel.findOne({
-                    product_id: d.product_id,
-                    company_id: updetedOrder.company_id
-                });
-
-                if (stock) {
-                    stock.out = parseInt(stock.out) - qty;
-                    if (stock.out < 0) stock.out = 0;
-
-                    stock.total_stock = parseInt(stock.total_stock) + qty;
-                    if (stock.total_stock < 0) stock.total_stock = 0;
-
-                    await stock.save();
-                }
-
-                const product = await productModel.findById(d.product_id);
-
-if (product) {
-
-  product.qty =
-    (product.qty || 0) + qty;
-
-  product.stock_out = Math.max(
-    0,
-    (product.stock_out || 0) - qty
-  );
-
-  product.total = product.qty;
-
-  await product.save();
-}
-            }
-            await SaleDetail.deleteMany({ sales_order_id: id });
-            if (Array.isArray(details) && details.length > 0) {
-                let detailDocs = await SaleDetail.insertMany(
-                    details.map(d => ({
-                        ...d,
-                        sales_order_id: updetedOrder._id,
-                    }))
-                );
-
-                for (let d of detailDocs) {
-                    let stock = await StockManagementModel.findOne({
-                    product_id: d.product_id,
-                    company_id: updetedOrder.company_id
-                    });
-                    const previousStock = stock ? stock.total_stock : 0;
-                    const qty = parseInt(d.qty);
-        
-                    if (stock) {
-                    stock.out += qty; 
-                    stock.total_stock -= qty; 
-                    await stock.save();
-                    } 
-                    
-                    
-                    const product = await productModel.findById(d.product_id);
-
-if (product) {
-
-  product.qty = Math.max(
-    0,
-    (product.qty || 0) - qty
-  );
-
-  product.stock_out =
-    (product.stock_out || 0) + qty;
-
-  product.total = product.qty;
-
-  await product.save();
-}
-                    else {
-                    await StockManagementModel.create({
-                        product_id: d.product_id,
-                        company_id: updetedOrder.company_id,
-                        out: qty,
-                        total_stock: parseInt(previousStock) - qty,
-                    });await StockManagementModel.create({
-  product_id: d.product_id,
-  company_id: updetedOrder.company_id,
-  in: 0,
-  out: qty,
-  total_stock: Math.max(0, previousStock - qty),
-});
-
-const product = await productModel.findById(d.product_id);
-
-if (product) {
-
-  product.qty = Math.max(
-    0,
-    (product.qty || 0) - qty
-  );
-
-  product.stock_out =
-    (product.stock_out || 0) + qty;
-
-  product.total = product.qty;
-
-  await product.save();
-}
-                    }
-                }
-            }
-
-            return res.json({ success: true, data: updetedOrder });
-        } catch (error) {
-            return res.status(500).json({
-            success: false,
-            message: "Server Error",
-            error: error.message || error,
-            });
-        }
-    },
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message || error,
+    });
+  }
+},
 
 
-    payments: async function (req, res) {
-        try {
-            const { client_id, amount, payment_method,remarks, date, allocations, card_no, ifsc, cheque_no, transaction_no, bank_name, branch } = req.body;
+payments: async function (req, res) {
 
-            if (!allocations || allocations.length === 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "No invoice allocations provided",
-                }); 
-            }
+  try {
 
-            console.log(allocations);
+    const {
+      client_id,
+      amount,
+      payment_method,
+      remarks,
+      date,
+      allocations,
+      card_no,
+      ifsc,
+      cheque_no,
+      transaction_no,
+      bank_name,
+      branch,
+    } = req.body;
 
-            let total_amount = 0;
-            total_amount = amount; 
+    // ✅ VALIDATION
+    if (!allocations || allocations.length === 0) {
 
-            // Save a master payment record (optional if you want a receipt per batch)
-            const receipts = [];
+      return res.status(400).json({
+        success: false,
+        message: "No invoice allocations provided",
+      });
+    }
 
-             const receipt = new SaleReceipt({
-                        client_id,                        
-                        amount: amount,
-                        payment_method,
-                        transaction_no,
-                        card_no,
-                        remarks,
-                        date,
-                        bank_name,
-                        ifsc,
-                        cheque_no,
-                        branch,
+    // ✅ RECEIPT ARRAY
+    const receipts = [];
 
-                        payment_date: new Date(),
-                    });
+    // ✅ PROCESS EACH INVOICE
+    for (const alloc of allocations) {
 
-                    await receipt.save();
+      const {
+        id,
+        paid_amount,
+      } = alloc;
 
-            for (const alloc of allocations) {
-                const { id, paid_amount } = alloc;
-                if(paid_amount > 0){
+      // ✅ SKIP INVALID
+      if (Number(paid_amount || 0) <= 0) {
+        continue;
+      }
 
-                    // Find the sale order
-                    const order = await SaleOrderModel.findById(id);
-                    if (!order) continue;
+      // ✅ FIND ORDER
+      const order =
+        await SaleOrderModel.findById(id);
 
-                    // Create receipt for this invoice
-                   
-                    
+      if (!order) {
+        continue;
+      }
 
-                    // Update order paid_amount
-                    order.paid_amount = (order.paid_amount || 0) + Number(paid_amount);
+      // ✅ UPDATE PAID AMOUNT
+ const remaining =
+  Number(order.total_amount || 0) -
+  Number(order.paid_amount || 0);
 
-                    if (order.paid_amount >= order.total_amount) {
-                        order.status = "Paid";
-                    } else if (order.paid_amount > 0) {
-                        order.status = "Partial";
-                    } else {
-                        order.status = "Unpaid";
-                    }
+const paymentToApply = Math.min(
+  Number(paid_amount || 0),
+  remaining
+);
 
-                    await order.save();
-                }
-            }
+order.paid_amount =
+  Number(order.paid_amount || 0) +
+  paymentToApply;
 
-            return res.json({
-            success: true,
-            data: receipts,
-            message: "Payment done successfully across invoices",
-            });
-        } catch (error) {
-            console.error(error);
-            return res.status(500).json({
-            success: false,
-            message: "Server Error",
-            error: error.message || error,
-            });
-        }
-    },
+      // ✅ SAVE ORDER
+      // Model automatically handles:
+      // status
+      // balance_amount
+      await order.save();
+
+      // ✅ CREATE RECEIPT
+      const receipt =
+        await SaleReceipt.create({
+
+          sale_order_id: order._id,
+
+          client_id,
+
+          invoice_no:
+            order.invoice_no || "",
+
+amount: paymentToApply,
+          payment_method:
+            payment_method || "Cash",
+
+          remarks:
+            remarks || "",
+
+          transaction_no:
+            transaction_no || "",
+
+          card_no:
+            card_no || "",
+
+          bank_name:
+            bank_name || "",
+
+          branch:
+            branch || "",
+
+          ifsc:
+            ifsc || "",
+
+          cheque_no:
+            cheque_no || "",
+
+          date:
+            date || new Date(),
+        });
+
+      receipts.push(receipt);
+    }
+
+    return res.json({
+      success: true,
+      data: receipts,
+      message:
+        "Payment done successfully across invoices",
+    });
+
+  } catch (error) {
+
+    console.error(
+      "PAYMENT ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message || error,
+    });
+  }
+},
      try: async function (req, res) {
 
 
@@ -722,27 +872,7 @@ if (product) {
            
     },
 
-    payment: async function (req, res) {
-        try {
-            const data = req.body;
-            
-            const payment = new SaleReceipt(data);
-            await payment.save();   
-            
-           
-
-            return res.json({ success: true, data:payment, message: "Payment Done Successfully"});
-
-           
-        } catch (error) {
-            console.error(error);
-            return res.status(500).json({
-            success: false,
-            message: "Server Error",
-            error: error.message || error,
-            });
-        }
-    },
+  
 
     updateStatus: async function (req, res) {
         try {
@@ -750,7 +880,17 @@ if (product) {
 
             const order = await SaleOrderModel.findById(id);
             if (order){
-                order.status = status;
+if (
+  ["Paid", "Partial", "Unpaid"].includes(status)
+) {
+  return res.status(400).json({
+    success: false,
+    message:
+      "Payment status cannot be updated manually",
+  });
+}
+
+order.status = status;
                 await order.save();
             }  
 
@@ -770,31 +910,106 @@ if (product) {
         }
     },
 
-    receipts: async function (req, res) {
-        try {
-            const company_id = req.params.id;
-            const receipt = await SaleReceipt.find().sort({ createdOn: -1 }).populate('client_id');
+ receipts: async function (req, res) {
 
-            const filtered = receipt.filter(
-                r => r.client_id && r.client_id.company_id.toString() === company_id.toString()
-            );
+  try {
 
-            return res.status(200).json({
-                success: true,
-                receipts: filtered,
-            });         
+    const company_id = req.params.id;
 
-           
-            
-        } catch (error) {
-                return res.status(500).json({
-                success: false,
-                message: "Server Error",
-                error: error.message || error
-            });
-            
-        }        
-    },
+    // ✅ FETCH RECEIPTS
+    const receipts =
+      await SaleReceipt.find()
+
+        .sort({ createdOn: -1 })
+
+        .populate({
+          path: "client_id",
+
+          select: `
+            first_name
+            last_name
+            company_name
+            company_id
+            contact_no_1
+            email
+          `,
+        })
+
+        .populate({
+          path: "sale_order_id",
+
+          select: `
+            invoice_no
+            total_amount
+            paid_amount
+            balance_amount
+            status
+          `,
+        })
+
+        .lean();
+
+    // ✅ FILTER COMPANY
+    const filtered = receipts.filter(
+
+      (r) =>
+
+        r.client_id &&
+
+        r.client_id.company_id?.toString() ===
+        company_id.toString()
+    );
+
+    // ✅ FORMAT RESPONSE
+    const formatted = filtered.map((r) => ({
+
+      ...r,
+
+      customer_name:
+        r.client_id?.company_name ||
+
+        `${r.client_id?.first_name || ""}
+         ${r.client_id?.last_name || ""}`.trim(),
+
+      invoice_no:
+        r.invoice_no ||
+        r.sale_order_id?.invoice_no ||
+        "",
+
+      invoice_status:
+        r.sale_order_id?.status || "",
+
+      total_amount:
+        r.sale_order_id?.total_amount || 0,
+
+      paid_amount:
+        r.sale_order_id?.paid_amount || 0,
+
+      pending_amount:
+        r.sale_order_id?.balance_amount || 0,
+    }));
+
+    return res.status(200).json({
+
+      success: true,
+
+      receipts: formatted,
+    });
+
+  } catch (error) {
+
+    console.error(
+      "RECEIPTS ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+      error: error.message || error,
+    });
+  }
+},
 
     printInvoice: async function (req, res) {
         try {
@@ -2013,7 +2228,7 @@ if (product) {
                                     ? [
                                         {
                                             text: [
-                                            { text: `Card Number: ${receipt.card_number || '-'}     ` },
+                                            { text: `Card Number: ${receipt.card_no || '-'}     ` },
                                             { text: `Transaction ID: ${receipt.transaction_no || '-'}` }
                                             ]
                                         }
@@ -2106,8 +2321,37 @@ if (product) {
         }        
     },
     
-     
+generateInvoice: async function (req, res) {
+  try {
+    const lastInvoice = await SaleOrderModel
+      .findOne({ invoice_no: { $exists: true, $ne: null, $ne: "" } })
+      .sort({ createdOn: -1 });
 
+    let nextNumber = 1;
+
+    if (
+      lastInvoice &&
+      lastInvoice.invoice_no &&
+      typeof lastInvoice.invoice_no === "string"
+    ) {
+      const parts = lastInvoice.invoice_no.split("-");
+      const lastPart = parts[parts.length - 1];
+      if (!isNaN(lastPart)) {
+        nextNumber = Number(lastPart) + 1;
+      }
+    }
+
+    const invoice_no = `I-${String(nextNumber).padStart(5, "0")}`;  // I-00025
+
+    return res.json({ success: true, invoice_no });
+
+  } catch (error) {
+    console.error("GENERATE INVOICE ERROR:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+},
+
+    
 }
 
 module.exports =  saleOrderControler;

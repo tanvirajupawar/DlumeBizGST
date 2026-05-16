@@ -1,4 +1,5 @@
 import { useState } from "react";
+import axios from "axios";
 import { FiMail, FiLock, FiEye, FiEyeOff, FiArrowRight } from "react-icons/fi";
 import { HiOutlineDocumentText } from "react-icons/hi";
 import { useAuth } from "../../context/AuthContext";
@@ -15,23 +16,52 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleLogin = (e) => {
-    e.preventDefault();
+const handleLogin = async (e) => {
 
-    if (!email || !password) {
-      toast.error("Please enter email and password");
-      return;
-    }
+  e.preventDefault();
+
+  if (!email || !password) {
+
+    toast.error(
+      "Please enter email and password"
+    );
+
+    return;
+  }
+
+  try {
+
+    const response = await axios.post(
+      "http://localhost:8000/api/user/signIn",
+      {
+        username: email,
+        password,
+      }
+    );
+
+    const data = response.data;
 
     login({
-      userData: { email },
-      accessToken: "dummy-token",
+
+      userData: data.user,
+
+      accessToken: data.token,
     });
 
     toast.success("Login Successful 🚀");
-    navigate("/dashboard");
-  };
 
+    navigate("/dashboard");
+
+  } catch (error) {
+
+    console.log(error);
+
+    toast.error(
+      error?.response?.data?.message ||
+      "Login Failed"
+    );
+  }
+};
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-10">

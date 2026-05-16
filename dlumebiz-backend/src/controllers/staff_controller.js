@@ -208,6 +208,44 @@ const staffController = {
       });
     }
   },
+
+  // UPDATE COMPANY DETAILS IN ALL STAFF
+  updateCompanyDetails: async function (req, res) {
+    try {
+
+      const companyId = req.params.company_id;
+
+      const updatedStaff = await StaffModel.updateMany(
+        { company_id: companyId },
+        {
+          $set: {
+            company_name: req.body.company_name,
+            company_gstin: req.body.company_gstin,
+            company_phone: req.body.company_phone,
+            company_email: req.body.company_email,
+            company_address: req.body.company_address,
+          },
+        }
+      );
+
+      return res.json({
+        success: true,
+        data: updatedStaff,
+        message: "Company details updated in all staff",
+      });
+
+    } catch (error) {
+
+      return res.status(500).json({
+        success: false,
+        message: "Server Error",
+        error: error.message || error,
+      });
+
+    }
+
+  },
+
 };
 
 module.exports = staffController;

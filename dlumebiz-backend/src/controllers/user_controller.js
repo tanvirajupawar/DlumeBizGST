@@ -1,4 +1,6 @@
 const UserModel = require("../models/user_model");
+const companyModel =
+require("../models/company_model");
 const bcrypt = require("bcrypt");
 const {  sendToken } = require('../middlewares/token');
 
@@ -76,7 +78,38 @@ const UserController = {
                 });
 
             }
-            sendToken(user, 200, res);
+           // FETCH COMPANY
+let company = null;
+
+if (user.company_id) {
+
+  company =
+    await companyModel.findById(
+      user.company_id
+    );
+}
+
+return res.status(200).json({
+
+  success: true,
+
+  token: "dummy-token",
+
+  user: {
+
+    _id: user._id,
+
+    name: user.name,
+
+    email: user.email,
+
+    phoneNumber: user.phoneNumber,
+
+    company_id: user.company_id,
+
+    company,
+  },
+});
             
         } catch (error) {
              return res.status(500).json({

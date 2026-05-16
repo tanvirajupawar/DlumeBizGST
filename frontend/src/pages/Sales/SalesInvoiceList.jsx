@@ -156,8 +156,10 @@ const [dateFilter, setDateFilter] = useState("All");
         const customer = inv.client_id || {};
         return {
           id: inv._id,
-          client_id: customer._id || inv.client_id?._id || inv.client_id || "",
-          customer_id: customer._id || inv.client_id?._id || inv.client_id || "",
+customer_id:
+  inv.client_id?._id ||
+  inv.client_id ||
+  "",
           invoiceNo: inv.invoice_no || "",
           invoiceDate: inv.invoice_date || "",
         status: inv.status || "Unpaid",
@@ -169,6 +171,10 @@ const [dateFilter, setDateFilter] = useState("All");
               })
             : "",
           amount: inv.total_amount || 0,
+
+pendingAmount:
+  (inv.total_amount || 0) -
+  (inv.paid_amount || 0),
           customer: {
             _id: customer._id || "",
             company_name: customer.company_name || "Walk-in",
@@ -236,11 +242,14 @@ const mapped = (data || []).map((col) => ({
 
   date: col.date || "",
 
-  method: col.payment_mode || "-",
+method: col.payment_method || "-",
+note:
+  col.remarks || "-",
 
-  amount: col.amount || 0,
+ amount: col.amount || 0,
 
-  status: "Received",
+
+
 }));
 
       setCollections(mapped);
@@ -253,19 +262,15 @@ const mapped = (data || []).map((col) => ({
   const handleCollection = async (data) => {
     try {
       const payload = {
-       customer_id:
-  data.customer_id?._id ||
-  data.customer_id ||
-  data.client_id?._id ||
-  data.client_id,
+ customer_id: data.customer_id,
         amount: Number(data.amount || 0),
-        payment_mode: data.paymentMode || "Cash",
-        remark: data.note || "",
+       payment_method: data.paymentMode || "Cash",
+remarks: data.note || "",
         invoice_ids: [data.invoiceId],
         date: data.date,
       };
 
-      console.log("COLLECTION PAYLOAD:", payload);
+   console.log("FINAL PAYLOAD", payload);
 
       const res = await axios.post(
         "http://localhost:8000/api/payment-in",
@@ -286,7 +291,10 @@ const mapped = (data || []).map((col) => ({
       }
     } catch (err) {
       console.error("COLLECTION ERROR:", err);
-      console.log("SERVER ERROR:", err?.response?.data);
+      console.log(
+  "SERVER ERROR:",
+  err?.response?.data?.message
+);
       alert(err?.response?.data?.message || "Failed to record collection");
     } finally {
       setPaymentTarget(null);
@@ -345,9 +353,10 @@ const totalSales = filteredInvoices.reduce(
   (s, i) => s + i.amount,
   0
 );
-  const totalCollected = filteredCollections
-    .filter((c) => c.status === "Received")
-    .reduce((s, c) => s + c.amount, 0);
+const totalCollected = filteredCollections.reduce(
+  (s, c) => s + c.amount,
+  0
+);
 
   return (
     <div className="space-y-5">
@@ -423,13 +432,16 @@ const totalSales = filteredInvoices.reduce(
         {/* ── Invoice Tab ── */}
         {isInvoice && (
           <>
-            <div className="grid grid-cols-[60px_1fr_1fr_140px_130px_130px_120px_90px_40px] border-b border-gray-200 bg-gray-50 px-6">
+            <div className="grid grid-cols-[60px_1fr_1fr_140px_130px_130px_130px_120px_90px_40px] border-b border-gray-200 bg-gray-50 px-6">
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase text-center">Sr No</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase">Customer</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase">Company</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase">Invoice No</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase">Date</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase text-right pr-6">Amount</div>
+              <div className="py-3 text-xs font-semibold text-gray-500 uppercase text-right pr-6">
+  Pending
+</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase text-center">Status</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase text-center">Pay</div>
               <div className="py-3" />
@@ -440,11 +452,12 @@ const totalSales = filteredInvoices.reduce(
             )}
 
             {filteredInvoices.map((inv, idx) => {
+              console.log("ROW CUSTOMER ID", inv.customer_id);
               const isLast = idx === filteredInvoices.length - 1;
               return (
                 <div key={inv.id} className={!isLast ? "border-b border-gray-100" : ""}>
                   <div
-                    className={`grid grid-cols-[60px_1fr_1fr_140px_130px_130px_120px_90px_40px] px-6 items-center cursor-pointer transition
+                    className={`grid grid-cols-[60px_1fr_1fr_140px_130px_130px_130px_120px_90px_40px] px-6 items-center cursor-pointer transition
                       ${selectedInvoice?.id === inv.id ? "bg-blue-50/60" : "hover:bg-gray-50"}`}
                     onClick={() => setSelectedInvoice(inv)}
                   >
@@ -454,16 +467,24 @@ const totalSales = filteredInvoices.reduce(
                     <div className="py-4 text-sm text-gray-500 font-mono">{inv.invoiceNo}</div>
                     <div className="py-4 text-sm text-gray-500">{inv.date}</div>
                     <div className="py-4 text-sm text-right pr-6 font-semibold">{fmt(inv.amount)}</div>
+                    <div className="py-4 text-sm text-right pr-6 font-semibold text-red-600">
+  {fmt(inv.pendingAmount)}
+</div>
                     <div className="py-4 flex justify-center">
                       <StatusBadge status={inv.status} />
                     </div>
 
                     {/* Pay button */}
                     <div className="py-4 flex justify-center" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => setPaymentTarget(inv)}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-[#1e3a8a] text-[11px] font-semibold text-[#1e3a8a] hover:bg-[#1e3a8a] hover:text-white transition"
-                      >
+                    <button
+disabled={!inv.customer_id || inv.pendingAmount <= 0}
+  onClick={() => setPaymentTarget(inv)}
+className={`flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-semibold transition
+${
+  inv.customer_id && inv.pendingAmount > 0
+    ? "border-[#1e3a8a] text-[#1e3a8a] hover:bg-[#1e3a8a] hover:text-white"
+    : "border-gray-300 text-gray-400 cursor-not-allowed bg-gray-100"
+}`}                      >
                         <FiCreditCard size={11} />
                         Pay
                       </button>
@@ -489,7 +510,7 @@ const totalSales = filteredInvoices.reduce(
         {/* ── Collection Tab (mirrors Purchase Payments tab exactly) ── */}
         {!isInvoice && (
           <>
-     <div className="grid grid-cols-[60px_1fr_1fr_130px_130px_110px_130px_100px] border-b border-gray-200 bg-gray-50 px-6">
+     <div className="grid grid-cols-[60px_1fr_1fr_130px_130px_110px_160px_130px] border-b border-gray-200 bg-gray-50 px-6">
 
   <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">
     Sr No
@@ -504,8 +525,12 @@ const totalSales = filteredInvoices.reduce(
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice No</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Method</div>
+              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Note
+</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right pr-6">Amount</div>
-              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">Status</div>
+
+
             </div>
 
             {filteredCollections.length === 0 && (
@@ -515,7 +540,7 @@ const totalSales = filteredInvoices.reduce(
             {filteredCollections.map((col, idx) => (
              <div
   key={col.id}
-  className={`grid grid-cols-[60px_1fr_1fr_130px_130px_110px_130px_100px] px-6 items-center hover:bg-gray-50 transition-colors
+  className={`grid grid-cols-[60px_1fr_1fr_130px_130px_110px_160px_130px] px-6 items-center hover:bg-gray-50 transition-colors
     ${idx !== filteredCollections.length - 1 ? "border-b border-gray-100" : ""}`}
 >
 
@@ -534,13 +559,12 @@ const totalSales = filteredInvoices.reduce(
   ? new Date(col.date).toLocaleDateString("en-GB")
   : "-"}</div>
                 <div className="py-4 text-sm text-gray-500">{col.method}</div>
+                 <div className="py-4 text-sm text-gray-500 truncate">
+  {col.note}
+</div>
                 <div className="py-4 text-sm font-semibold text-gray-800 text-right pr-6 tabular-nums">{fmt(col.amount)}</div>
-                <div className="py-4 flex justify-center">
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded
-                    ${col.status === "Received" ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
-                    {col.status}
-                  </span>
-                </div>
+          
+             
               </div>
             ))}
           </>

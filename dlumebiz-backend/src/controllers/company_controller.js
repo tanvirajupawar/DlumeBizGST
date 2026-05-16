@@ -129,6 +129,95 @@ const companyControler = {
     }
   },
 
+
+  activatePlan: async function (req, res) {
+
+  try {
+
+    const {
+      company_id,
+      plan_type,
+      duration_months,
+    } = req.body;
+
+    const company =
+      await companyModel.findById(company_id);
+
+    if (!company) {
+
+      return res.status(404).json({
+        success: false,
+        message: "Company not found",
+      });
+    }
+
+    // EXPIRY DATE
+    const expiryDate = new Date();
+
+    expiryDate.setMonth(
+      expiryDate.getMonth() +
+      Number(duration_months)
+    );
+
+    // FEATURES
+    let features = {
+
+      gst: false,
+
+      inventory: true,
+
+      reports: true,
+    };
+
+    // GST FEATURES ENABLE
+    if (plan_type === "GST") {
+
+      features.gst = true;
+    }
+
+    // UPDATE COMPANY
+    company.plan_type = plan_type;
+
+    company.subscription_status = "ACTIVE";
+
+    company.subscription_expiry =
+      expiryDate;
+
+    company.plan_duration_months =
+      duration_months;
+
+    company.features = features;
+
+    await company.save();
+
+    return res.json({
+
+      success: true,
+
+      message:
+        "Plan activated successfully",
+
+      data: company,
+    });
+
+  } catch (error) {
+
+    console.log(
+      "ACTIVATE PLAN ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+
+      success: false,
+
+      message: "Server Error",
+
+      error: error.message || error,
+    });
+  }
+},
+
   delete: async function (req, res) {
     try {
       const id = req.params.id;

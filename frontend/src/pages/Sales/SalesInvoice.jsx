@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { useAuth }from "../../context/AuthContext";
 import SearchSelect from "../../components/SearchSelect";
 import Modal from "../../components/Modal";
 import { useParams, useNavigate } from "react-router-dom";
@@ -444,6 +445,12 @@ function ShippingAddressModal({ customerForm, setCustomerForm, onStateChange, on
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function SalesInvoice() {
+
+  const { user } = useAuth();
+
+const isGSTUser =
+  user?.company?.features?.gst;
+
   const { id }   = useParams();
   const navigate = useNavigate();
   const isEdit   = !!id;
@@ -628,12 +635,13 @@ const totalDiscount = items.reduce((s, i) => {
   return s + (Number(i.discount) || 0);
 }, 0);
 
-const taxableAmount = subtotal - totalDiscount - (Number(extraDiscount) || 0);
-
-const totalTax = items.reduce((s, i) => {
-  const t = itemTaxBreakup(i);
-  return s + t.cgst + t.sgst + t.igst;
-}, 0);
+const taxableAmount = subtotal - totalDiscount;
+const totalTax = isGSTUser
+  ? items.reduce((s, i) => {
+      const t = itemTaxBreakup(i);
+      return s + t.cgst + t.sgst + t.igst;
+    }, 0)
+  : 0;
 
 const beforeRound = taxableAmount + totalTax + (Number(otherCharges) || 0);
 
@@ -674,7 +682,9 @@ const roundOff = grandTotal - beforeRound;
         setInvoiceDate(p.invoice_date?.split("T")[0] || "");
         setDueDate(p.due_date?.split("T")[0] || "");
         setSalesType(p.sales_type || "Credit");
-        setReverseCharge(p.reverse_charge || "No");
+setReverseCharge(
+  p.reverse_charge ? "Yes" : "No"
+);
         setNotes(p.notes || "");
         if (p.customer_id) {
           const cid = typeof p.customer_id === "object" ? p.customer_id._id : p.customer_id;
@@ -711,7 +721,7 @@ const roundOff = grandTotal - beforeRound;
   };
 });
        setItems(mappedItems.length > 0 ? mappedItems : []);
-        setAmountReceived(Number(p.amount_received) || 0);
+        setAmountReceived(Number(p.advance_amount) || 0);
         setPaymentMode(p.payment_mode || "Cash");
       }
     } catch (err) { console.error("EDIT FETCH ERROR:", err); }
@@ -778,6 +788,11 @@ const handleSaveSales = async () => {
 
     const it = items[i];
 
+    if (!it.product_id) {
+  alert(`Please select valid product in row ${i + 1}`);
+  return;
+}
+
     if (!it.name) {
       alert(`Item Name required in row ${i + 1}`);
       return;
@@ -799,32 +814,36 @@ const handleSaveSales = async () => {
     }
   }
 
-  // ✅ GST CATEGORY DETECTION
+// ✅ GST CATEGORY DETECTION
 
-const customerGSTIN = (customerForm.gstin || "").trim();
+let invoice_category = "NON_GST";
 
-const isB2B =
-  customerGSTIN.length === 15;
+if (isGSTUser) {
 
-const SELLER_STATE = "27"; // Maharashtra
+  const customerGSTIN =
+    (customerForm.gstin || "").trim();
 
-const isInterState =
-  customerForm.state_code &&
-  customerForm.state_code !== SELLER_STATE;
+  const isB2B =
+    customerGSTIN.length === 15;
 
-const isLargeInvoice =
-  grandTotal > 250000;
+  const SELLER_STATE = "27";
 
-let invoice_category = "B2CS";
+  const isInterState =
+    customerForm.state_code &&
+    customerForm.state_code !== SELLER_STATE;
 
-if (isB2B) {
-  invoice_category = "B2B";
-}
-else if (!isB2B && isInterState && isLargeInvoice) {
-  invoice_category = "B2CL";
-}
-else {
-  invoice_category = "B2CS";
+  const isLargeInvoice =
+    grandTotal > 250000;
+
+  if (isB2B) {
+    invoice_category = "B2B";
+  }
+  else if (!isB2B && isInterState && isLargeInvoice) {
+    invoice_category = "B2CL";
+  }
+  else {
+    invoice_category = "B2CS";
+  }
 }
 
   // ✅ PAYLOAD
@@ -836,9 +855,8 @@ else {
     invoice_date: invoiceDate,
     due_date: dueDate,
 
-    sales_type: salesType,
-    reverse_charge: reverseCharge,
-
+    invoice_type: salesType,
+reverse_charge: reverseCharge === "Yes",
     notes,
 
     // ✅ CATEGORY
@@ -855,13 +873,21 @@ else {
       ? (customerForm.phone || "")
       : customerForm.phone,
 
-    gstin: selectedCustomer?.isWalkIn
-      ? ""
-      : customerForm.gstin,
+gstin: isGSTUser
+  ? (
+      selectedCustomer?.isWalkIn
+        ? ""
+        : customerForm.gstin
+    )
+  : "",
 
-    place_of_supply: selectedCustomer?.isWalkIn
-      ? ""
-      : customerForm.state_code,
+ place_of_supply: isGSTUser
+  ? (
+      selectedCustomer?.isWalkIn
+        ? ""
+        : customerForm.state_code
+    )
+  : "",
 
     state: selectedCustomer?.isWalkIn
       ? ""
@@ -872,25 +898,35 @@ else {
       : customerForm.state_code,
 
     // ✅ ITEMS
-    details: items.map(it => ({
-      product_name: it.name,
-      product_id: it.product_id || null,
-      item_type: it.itemType,
+details: items.map(it => ({
 
-      sku: it.sku,
-      hsn: it.hsn,
-      unit: it.unit,
+  company_id: localStorage.getItem("company_id"),
 
-      qty: it.qty,
+  product_name: it.name,
 
-      price: it.salePrice,
+  product_id: it.product_id,
 
-      discount: it.discount || 0,
+  item_type: it.itemType,
 
-      gst_rate: it.gstRate || 18,
+  sku: it.sku,
 
-      amount: itemTotal(it),
-    })),
+  hsn: it.hsn,
+
+  unit: it.unit,
+
+  qty: it.qty,
+
+  price: it.salePrice,
+
+  discount: it.discount || 0,
+
+  gst_rate: isGSTUser
+    ? (it.gstRate || 18)
+    : 0,
+
+  amount: itemTotal(it),
+
+})),
 
     // ✅ TOTALS
     sub_total: subtotal,
@@ -908,16 +944,12 @@ else {
     total_amount: grandTotal,
 
     // ✅ PAYMENT
-    amount_received: Number(amountReceived),
-
+advance_amount: Number(amountReceived || 0),
     payment_mode: paymentMode,
 
     payment_ref: paymentRef,
 
-    status:
-      Number(amountReceived) >= grandTotal
-        ? "Paid"
-        : "Pending",
+  
   };
 
   try {
@@ -1020,40 +1052,142 @@ else {
             )}
           </div>
 
-          {/* SHIP TO */}
-          <div style={{ flex: 1, padding: "16px 18px", display: "flex", flexDirection: "column", gap: "10px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>Ship To</span>
-              {selectedCustomer && (
-                <button onClick={() => setShowShippingModal(true)}
-                  style={{ padding: "4px 12px", border: "1px solid #d1d5db", borderRadius: "5px", background: "#fff", fontSize: "12px", fontWeight: 600, color: "#374151", cursor: "pointer", fontFamily: "inherit" }}>
-                  Change
-                </button>
-              )}
-            </div>
-            {!selectedCustomer && (
-              <div style={{ border: "1.5px dashed #e5e7eb", borderRadius: "8px", padding: "22px 16px", textAlign: "center", color: "#d1d5db" }}>
-                <div style={{ fontSize: "13px" }}>Select a customer first</div>
-              </div>
-            )}
-            {selectedCustomer?.isWalkIn && (
-              <div style={{ fontWeight: 700, fontSize: "14px", color: "#111827" }}>{customerForm.name || "Walk-in"}</div>
-            )}
-            {selectedCustomer && !selectedCustomer.isWalkIn && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <div style={{ fontWeight: 700, fontSize: "14px", color: "#111827" }}>{shippingForm.name}</div>
-                {shippingForm.phone && <div style={{ fontSize: "13px", color: "#374151" }}>Phone: <strong>{shippingForm.phone}</strong></div>}
-                {shippingForm.gstin && <div style={{ marginTop: "2px" }}><span style={{ fontFamily: "monospace", fontSize: "11.5px", color: "#1d4ed8", background: "#eff6ff", padding: "2px 7px", borderRadius: "4px" }}>{shippingForm.gstin}</span></div>}
-                {(shippingForm.address_line1 || shippingForm.city) && (
-                  <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px", lineHeight: 1.5 }}>
-                    {[shippingForm.address_line1, shippingForm.city].filter(Boolean).join(", ")}
-                    {shippingForm.state && <>{", "}{shippingForm.state} ({shippingForm.state_code || "--"})</>}
-                    {shippingForm.pincode && <> — {shippingForm.pincode}</>}
-                  </div>
-                )}
-              </div>
-            )}
+          
+        
+
+
+    {isGSTUser && (
+  <>
+    {/* SHIP TO */}
+    <div
+      style={{
+        flex: 1,
+        padding: "16px 18px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "10px",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <span
+          style={{
+            fontSize: "12px",
+            fontWeight: 700,
+            color: "#6b7280",
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          Ship To
+        </span>
+
+        {selectedCustomer && (
+          <button
+            onClick={() => setShowShippingModal(true)}
+            style={{
+              padding: "4px 12px",
+              border: "1px solid #d1d5db",
+              borderRadius: "5px",
+              background: "#fff",
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "#374151",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Change
+          </button>
+        )}
+      </div>
+
+      {!selectedCustomer && (
+        <div
+          style={{
+            border: "1.5px dashed #e5e7eb",
+            borderRadius: "8px",
+            padding: "22px 16px",
+            textAlign: "center",
+            color: "#d1d5db",
+          }}
+        >
+          <div style={{ fontSize: "13px" }}>
+            Select a customer first
           </div>
+        </div>
+      )}
+
+      {selectedCustomer?.isWalkIn && (
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: "14px",
+            color: "#111827",
+          }}
+        >
+          {customerForm.name || "Walk-in"}
+        </div>
+      )}
+
+      {selectedCustomer && !selectedCustomer.isWalkIn && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+          }}
+        >
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: "14px",
+              color: "#111827",
+            }}
+          >
+            {shippingForm.name}
+          </div>
+
+          {shippingForm.phone && (
+            <div
+              style={{
+                fontSize: "13px",
+                color: "#374151",
+              }}
+            >
+              Phone: <strong>{shippingForm.phone}</strong>
+            </div>
+          )}
+
+          {(shippingForm.address_line1 ||
+            shippingForm.city) && (
+            <div
+              style={{
+                fontSize: "12px",
+                color: "#6b7280",
+                marginTop: "2px",
+                lineHeight: 1.5,
+              }}
+            >
+              {[
+                shippingForm.address_line1,
+                shippingForm.city,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  </>
+)}
+        
         </div>
 
         {/* INVOICE DETAILS */}
@@ -1084,13 +1218,20 @@ else {
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Due Date</label>
               <input type="date" value={dueDate || ""} onChange={e => setDueDate(e.target.value)} style={inputStyle} />
             </div>
+
+
+            {isGSTUser && (
+
             <div>
               <label style={{ fontSize: "12px", color: "#6b7280" }}>Reverse Charge</label>
               <select value={reverseCharge || "No"} onChange={e => setReverseCharge(e.target.value)} style={inputStyle}>
                 <option>No</option><option>Yes</option>
               </select>
             </div>
+            )}
           </div>
+
+
           <div style={{ marginTop: "12px" }}>
             <label style={{ fontSize: "12px", color: "#6b7280" }}>Notes / Remarks</label>
             <input value={notes || ""} onChange={e => setNotes(e.target.value)} placeholder="Any notes about this sale..." style={inputStyle} />
@@ -1100,13 +1241,19 @@ else {
 
       {/* ── Items / Stock ── */}
       <Section title="Items / Stock">
-      <ItemsTable
-  items={items} itemList={itemList}
-  updateItem={updateItem} removeItem={removeItem} addItems={addItems}
-  itemTaxable={itemTaxable} itemTaxBreakup={itemTaxBreakup} itemTotal={itemTotal}
+<ItemsTable
+  items={items}
+  itemList={itemList}
+  updateItem={updateItem}
+  removeItem={removeItem}
+  addItems={addItems}
+  itemTaxable={itemTaxable}
+  itemTaxBreakup={itemTaxBreakup}
+  itemTotal={itemTotal}
   priceField="salePrice"
   priceLabel="Sale Price"
   isSales={true}
+  isGSTUser={isGSTUser}
 />
 
         {/* Totals panel */}
@@ -1119,10 +1266,31 @@ else {
                 style={{ width: "70px", padding: "3px 6px", border: "1px solid #e5e7eb", borderRadius: "5px", fontSize: "12.5px", textAlign: "right", outline: "none", fontFamily: "inherit" }} />
             </div>
 
-            {[
-              { label: "Taxable Amount", value: `₹ ${taxableAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` },
-              { label: "GST Amount",     value: `₹ ${totalTax.toLocaleString("en-IN",      { minimumFractionDigits: 2 })}` },
-            ].map(({ label, value }) => (
+    {[
+  ...(isGSTUser
+    ? [
+        {
+          label: "Taxable Amount",
+          value: `₹ ${taxableAmount.toLocaleString("en-IN", {
+            minimumFractionDigits: 2,
+          })}`,
+        },
+        {
+          label: "GST Amount",
+          value: `₹ ${totalTax.toLocaleString("en-IN", {
+            minimumFractionDigits: 2,
+          })}`,
+        },
+      ]
+    : [
+        {
+          label: "Subtotal",
+          value: `₹ ${subtotal.toLocaleString("en-IN", {
+            minimumFractionDigits: 2,
+          })}`,
+        },
+      ]),
+].map(({ label, value }) => (
               <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "8px 16px", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
                 <span style={{ color: "#374151" }}>{label}</span>
                 <span style={{ color: "#111827", fontWeight: 500 }}>{value}</span>
@@ -1186,8 +1354,9 @@ else {
 
   
 {/* HSN Tax Summary */}
-{Object.keys(taxSummary).length > 0 && (
-  <div style={{ marginTop: "20px" }}>
+{isGSTUser &&
+Object.keys(taxSummary).length > 0 && (
+    <div style={{ marginTop: "20px" }}>
     <div style={{ fontSize: "12px", fontWeight: 700, color: "#374151", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "8px" }}>
       Tax Summary (HSN Wise)
     </div>

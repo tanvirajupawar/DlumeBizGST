@@ -1,12 +1,19 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import axios from "axios";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { useAuth } from "../../context/AuthContext";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TABS = ["Purchase", "Purchase Return / Debit Note", "Purchase Summary", "ITC Summary"];
+const GST_TABS = [
+  "Purchase",
+  "Purchase Return / Debit Note",
+  "Purchase Summary",
+  "ITC Summary"
+];
 
+const NON_GST_TABS = [
+  "Purchase"
+];
 const FILTERS = [
   "Today", "Yesterday", "This Week", "Last Week", "Last 7 Days",
   "This Month", "Previous Month", "Last 30 Days", "This Quarter",
@@ -15,6 +22,374 @@ const FILTERS = [
 ];
 
 const BUYER_STATE = "27"; // Maharashtra
+
+// ─── PDF Generator ────────────────────────────────────────────────────────────
+
+const generatePDFFile = async (data, columns, title, dateRange = "") => {
+  const { jsPDF } = await import("jspdf");
+  const autoTable  = (await import("jspdf-autotable")).default;
+
+  const doc      = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW    = 297;
+  const pageH    = 210;
+  const margin   = 15;
+  const contentW = pageW - margin * 2;
+
+  const now     = new Date();
+  const dateStr = now.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  const txt  = (text, x, y, opts = {}) => doc.text(String(text ?? ""), x, y, opts);
+  const line = (x1, y1, x2, y2) => {
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.25);
+    doc.line(x1, y1, x2, y2);
+  };
+
+  // ── Page header ──
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(20, 20, 20);
+  txt("D'Lume", margin, 14);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(100, 100, 100);
+  txt("Ph: 9137826646", margin, 19);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(30, 30, 30);
+  txt(title, pageW - margin, 13, { align: "right" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(120, 120, 120);
+  txt(`Generated: ${dateStr}`, pageW - margin, 18, { align: "right" });
+  if (dateRange) {
+    txt(`Period: ${dateRange}`, pageW - margin, 23, { align: "right" });
+  }
+
+  line(margin, 26, pageW - margin, 26);
+
+  // ── Amount columns detection ──
+  const amountKeys = ["value", "taxable", "igst", "cgst", "sgst", "total_tax", "total", "credit", "debit", "balance", "amount"];
+
+  autoTable(doc, {
+    startY: 31,
+    head: [columns.map(c => c.label)],
+    body: data.map(row =>
+      columns.map(c => {
+        const val = row[c.key];
+        if (val === null || val === undefined) return "—";
+        if (amountKeys.some(k => c.key.toLowerCase().includes(k)) && typeof val === "number") {
+          return "Rs. " + val.toLocaleString("en-IN", { minimumFractionDigits: 2 });
+        }
+        return String(val);
+      })
+    ),
+    margin: { left: margin, right: margin },
+    tableWidth: contentW,
+    styles: {
+      fontSize: 7.5,
+      cellPadding: { top: 2.5, bottom: 2.5, left: 3, right: 3 },
+      font: "helvetica",
+      textColor: [25, 25, 25],
+      lineColor: [200, 200, 200],
+      lineWidth: 0.2,
+      overflow: "linebreak",
+    },
+    headStyles: {
+      fillColor: [240, 240, 240],
+      textColor: [25, 25, 25],
+      fontStyle: "bold",
+      fontSize: 7,
+      lineColor: [170, 170, 170],
+      lineWidth: 0.3,
+    },
+    alternateRowStyles: { fillColor: [250, 250, 250] },
+    bodyStyles:         { fillColor: [255, 255, 255] },
+    columnStyles: (() => {
+      const styles = {};
+      columns.forEach((c, i) => {
+        if (amountKeys.some(k => c.key.toLowerCase().includes(k))) {
+          styles[i] = { halign: "right" };
+        }
+      });
+      return styles;
+    })(),
+    didDrawPage: (hookData) => {
+      const pageCount = doc.internal.getNumberOfPages();
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      line(margin, pageH - 11, pageW - margin, pageH - 11);
+      txt(`Page ${hookData.pageNumber} of ${pageCount}`, pageW - margin, pageH - 6, { align: "right" });
+      txt("D'Lume — Confidential", margin, pageH - 6);
+    },
+  });
+
+  // ── Totals summary ──
+  const lastY = doc.lastAutoTable.finalY;
+  const amountCols = columns.filter(c => amountKeys.some(k => c.key.toLowerCase().includes(k)));
+
+  if (amountCols.length > 0 && data.length > 0) {
+    const summaryY = lastY + 5;
+    line(margin, summaryY, pageW - margin, summaryY);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 100, 100);
+    txt(`${data.length} record${data.length !== 1 ? "s" : ""}`, margin, summaryY + 5);
+
+    let rightOffset = pageW - margin;
+    [...amountCols].reverse().forEach(col => {
+      const total = data.reduce((sum, row) => sum + Number(row[col.key] || 0), 0);
+      const formatted = "Rs. " + total.toLocaleString("en-IN", { minimumFractionDigits: 2 });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(120, 120, 120);
+      txt(`${col.label}:`, rightOffset - 30, summaryY + 5, { align: "right" });
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(20, 20, 20);
+      txt(formatted, rightOffset, summaryY + 5, { align: "right" });
+
+      rightOffset -= 55;
+    });
+  }
+
+  const blob = doc.output("blob");
+  return new File([blob], `${title}.pdf`, { type: "application/pdf" });
+};
+
+// ─── Excel Generator ──────────────────────────────────────────────────────────
+
+const generateExcelFile = async (data, columns, title, dateRange = "") => {
+  const XLSX = await import("xlsx");
+
+  const wb   = XLSX.utils.book_new();
+  const rows = [];
+
+  rows.push(["D'Lume"]);
+  rows.push(["Ph: 9137826646"]);
+  rows.push([`Report: ${title}`]);
+  rows.push([`Generated: ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`]);
+  if (dateRange) rows.push([`Period: ${dateRange}`]);
+  rows.push([]);
+
+  rows.push(columns.map(c => c.label));
+
+  const amountKeys = ["value", "taxable", "igst", "cgst", "sgst", "total_tax", "total", "credit", "debit", "balance", "amount"];
+  data.forEach(row => {
+    rows.push(columns.map(c => {
+      const val = row[c.key];
+      if (val === null || val === undefined) return "";
+      if (typeof val === "number") return val;
+      if (amountKeys.some(k => c.key.toLowerCase().includes(k))) {
+        const num = Number(val);
+        if (!isNaN(num)) return num;
+      }
+      return String(val);
+    }));
+  });
+
+  const amountCols = columns.filter(c => amountKeys.some(k => c.key.toLowerCase().includes(k)));
+  if (amountCols.length > 0 && data.length > 0) {
+    rows.push([]);
+    const totalsRow = columns.map(col => {
+      if (amountCols.some(ac => ac.key === col.key)) {
+        return data.reduce((sum, row) => sum + Number(row[col.key] || 0), 0);
+      }
+      return col.key === columns[0].key ? "TOTAL" : "";
+    });
+    rows.push(totalsRow);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  ws["!cols"] = columns.map(c => {
+    if (["name", "vendor", "description", "place"].some(k => c.key.toLowerCase().includes(k))) return { wch: 30 };
+    if (amountKeys.some(k => c.key.toLowerCase().includes(k))) return { wch: 16 };
+    if (["gstin", "invoice", "note", "return"].some(k => c.key.toLowerCase().includes(k))) return { wch: 20 };
+    return { wch: 15 };
+  });
+
+  XLSX.utils.book_append_sheet(wb, ws, title.substring(0, 31));
+
+  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob  = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  return new File([blob], `${title}.xlsx`, { type: blob.type });
+};
+
+// ─── Download helper ──────────────────────────────────────────────────────────
+
+const triggerDownload = (file) => {
+  const url = URL.createObjectURL(file);
+  const a   = document.createElement("a");
+  a.href = url; a.download = file.name; a.click();
+  URL.revokeObjectURL(url);
+};
+
+// ─── Export data builders (per tab) ──────────────────────────────────────────
+
+function buildExportData(tab, purchases, purchaseReturns, debitNotes, filter) {
+  if (tab === "Purchase") {
+    const rows = filterByDate(purchases, filter, "invoice_date");
+    return {
+      data: rows.map((p, i) => {
+        const t = calcTax(p);
+        return {
+          sr_no:    i + 1,
+          gstin:    t.gstin || "—",
+          name:     t.vendorName,
+          invoice:  p.supplier_invoice_no || p.order_no || "—",
+          date:     fmtDate(p.invoice_date),
+          place:    t.placeOfSupply,
+          value:    p.total_amount || 0,
+          taxable:  t.taxable,
+          igst:     t.igst,
+          cgst:     t.cgst,
+          sgst:     t.sgst,
+          total_tax: t.total,
+          rate:     t.taxable ? ((t.total / t.taxable) * 100).toFixed(2) + "%" : "0%",
+          itc:      t.gstin.length === 15 ? "Yes" : "No",
+        };
+      }),
+      columns: [
+        { key: "sr_no",     label: "Sr No"           },
+        { key: "gstin",     label: "GSTIN"           },
+        { key: "name",      label: "Vendor Name"     },
+        { key: "invoice",   label: "Invoice No."     },
+        { key: "date",      label: "Invoice Date"    },
+        { key: "place",     label: "Place of Supply" },
+        { key: "value",     label: "Invoice Value"   },
+        { key: "taxable",   label: "Taxable Value"   },
+        { key: "igst",      label: "IGST"            },
+        { key: "cgst",      label: "CGST"            },
+        { key: "sgst",      label: "SGST"            },
+        { key: "total_tax", label: "Total Tax"       },
+        { key: "rate",      label: "Tax %"           },
+        { key: "itc",       label: "ITC Eligible"    },
+      ],
+    };
+  }
+
+  if (tab === "Purchase Return / Debit Note") {
+    const rows = filterByDate([...purchaseReturns, ...debitNotes], filter, (r) => r.date || r.debit_date);
+    return {
+      data: rows.map((p, i) => {
+        const t = calcTax(p);
+        return {
+          sr_no:    i + 1,
+          gstin:    t.gstin || "—",
+          name:     t.vendorName,
+          return_no: p.return_no || p.debit_note_no || "—",
+          date:     fmtDate(p.date || p.debit_date),
+          place:    t.placeOfSupply,
+          value:    p.total_amount || 0,
+          taxable:  t.taxable,
+          igst:     t.igst,
+          cgst:     t.cgst,
+          sgst:     t.sgst,
+          total_tax: t.total,
+          itc:      t.gstin.length === 15 ? "Yes" : "No",
+        };
+      }),
+      columns: [
+        { key: "sr_no",     label: "Sr No"                   },
+        { key: "gstin",     label: "GSTIN"                   },
+        { key: "name",      label: "Vendor Name"             },
+        { key: "return_no", label: "Return / Debit Note No." },
+        { key: "date",      label: "Return Date"             },
+        { key: "place",     label: "Place of Supply"         },
+        { key: "value",     label: "Invoice Value"           },
+        { key: "taxable",   label: "Taxable Value"           },
+        { key: "igst",      label: "IGST"                    },
+        { key: "cgst",      label: "CGST"                    },
+        { key: "sgst",      label: "SGST"                    },
+        { key: "total_tax", label: "Total Tax"               },
+        { key: "itc",       label: "ITC Eligible"            },
+      ],
+    };
+  }
+
+  if (tab === "Purchase Summary") {
+    const rows = filterByDate(purchases, filter, "invoice_date");
+    const map  = {};
+    rows.forEach(p => {
+      const { gstin } = extractVendorInfo(p);
+      const vendorState = gstin.substring(0, 2);
+      const isIntra     = vendorState === BUYER_STATE;
+      (p.details || []).forEach(item => {
+        const rate    = Number(item.gst_rate) || 0;
+        const taxable = (Number(item.qty) || 0) * (Number(item.price) || 0) - (Number(item.discount) || 0);
+        const tax     = (taxable * rate) / 100;
+        if (!map[rate]) map[rate] = { rate, taxable: 0, igst: 0, cgst: 0, sgst: 0 };
+        map[rate].taxable += taxable;
+        if (isIntra) { map[rate].cgst += tax / 2; map[rate].sgst += tax / 2; }
+        else          { map[rate].igst += tax; }
+      });
+    });
+    return {
+      data: Object.values(map).sort((a, b) => a.rate - b.rate).map((r, i) => ({
+        sr_no:     i + 1,
+        rate:      `${r.rate}%`,
+        taxable:   r.taxable,
+        igst:      r.igst,
+        cgst:      r.cgst,
+        sgst:      r.sgst,
+        total_tax: r.igst + r.cgst + r.sgst,
+      })),
+      columns: [
+        { key: "sr_no",     label: "Sr No"         },
+        { key: "rate",      label: "GST Slab"      },
+        { key: "taxable",   label: "Taxable Value" },
+        { key: "igst",      label: "IGST"          },
+        { key: "cgst",      label: "CGST"          },
+        { key: "sgst",      label: "SGST"          },
+        { key: "total_tax", label: "Total Tax"     },
+      ],
+    };
+  }
+
+  if (tab === "ITC Summary") {
+    const filtP = filterByDate(purchases, filter, "invoice_date");
+    const filtR = filterByDate([...purchaseReturns, ...debitNotes], filter, (r) => r.date || r.debit_date);
+    let elig = { igst: 0, cgst: 0, sgst: 0 };
+    let rev  = { igst: 0, cgst: 0, sgst: 0 };
+    let inel = { igst: 0, cgst: 0, sgst: 0 };
+    filtP.forEach(p => {
+      const t = calcTax(p);
+      if (t.gstin.length === 15) { elig.igst += t.igst; elig.cgst += t.cgst; elig.sgst += t.sgst; }
+      else                        { inel.igst += t.igst; inel.cgst += t.cgst; inel.sgst += t.sgst; }
+    });
+    filtR.forEach(p => {
+      const t = calcTax(p);
+      if (t.gstin.length === 15) { rev.igst += t.igst; rev.cgst += t.cgst; rev.sgst += t.sgst; }
+    });
+    const net = { igst: elig.igst - rev.igst, cgst: elig.cgst - rev.cgst, sgst: elig.sgst - rev.sgst };
+    return {
+      data: [
+        { type: "Eligible ITC",     igst: elig.igst, cgst: elig.cgst, sgst: elig.sgst, total_tax: elig.igst + elig.cgst + elig.sgst, status: "Claimable"     },
+        { type: "ITC Reversed",     igst: rev.igst,  cgst: rev.cgst,  sgst: rev.sgst,  total_tax: rev.igst  + rev.cgst  + rev.sgst,  status: "Reversed"      },
+        { type: "Ineligible ITC",   igst: inel.igst, cgst: inel.cgst, sgst: inel.sgst, total_tax: inel.igst + inel.cgst + inel.sgst, status: "Not Claimable" },
+        { type: "Net ITC Available", igst: net.igst,  cgst: net.cgst,  sgst: net.sgst,  total_tax: net.igst  + net.cgst  + net.sgst,  status: net.igst + net.cgst + net.sgst >= 0 ? "Available" : "Negative" },
+      ],
+      columns: [
+        { key: "type",      label: "ITC Type"   },
+        { key: "igst",      label: "IGST"       },
+        { key: "cgst",      label: "CGST"       },
+        { key: "sgst",      label: "SGST"       },
+        { key: "total_tax", label: "Total ITC"  },
+        { key: "status",    label: "Status"     },
+      ],
+    };
+  }
+
+  return { data: [], columns: [] };
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -216,7 +591,7 @@ function DateFilter({ selected, onChange }) {
         </svg>
       </div>
       {open && (
-        <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", width: 270, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 8px 30px rgba(0,0,0,0.1)", zIndex: 100, overflow: "hidden" }}>
+        <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", width: 270, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 8px 30px rgba(0,0,0,0.1)", zIndex: 9999, overflow: "hidden" }}>
           <div style={{ padding: "8px 14px", fontSize: "10px", fontWeight: 600, color: "#9ca3af", background: "#f9fafb", borderBottom: "1px solid #f3f4f6", textTransform: "uppercase", letterSpacing: "0.06em" }}>
             Select date range
           </div>
@@ -272,7 +647,6 @@ const TD_STYLE = {
   wordBreak: "break-word",
   lineHeight: "1.3",
 };
-
 const TF_STYLE = {
   padding: "8px 5px",
   fontSize: "11px",
@@ -281,16 +655,11 @@ const TF_STYLE = {
   borderTop: "2px solid #e5e7eb",
   textAlign: "center",
 };
-// ─── Tab: Purchase ────────────────────────────────────────────────────────────
-// Columns (13 total):
-// [1] GSTIN | [2] Vendor name |
-// -- GSTR-2B group (4): [3] Invoice no. | [4] Invoice date | [5] Place of supply | [6] Invoice value --
-// [7] Taxable value |
-// -- Amount of tax group (4): [8] IGST | [9] CGST | [10] SGST | [11] Total tax --
-// [12] Tax % | [13] ITC eligible
 
-function PurchaseTab({ data, filter }) {
-  const rows = filterByDate(data, filter, "invoice_date");
+// ─── Tab: Purchase ─────────────────────────────────────────────────────────────
+
+function PurchaseTab({ data, filter, isGSTUser }) {
+    const rows = filterByDate(data, filter, "invoice_date");
 
   const totals = useMemo(() => {
     return rows.reduce((acc, p) => {
@@ -308,31 +677,37 @@ function PurchaseTab({ data, filter }) {
 
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="Total invoices"      value={rows.length} />
-        <KpiCard label="Total taxable value" value={`₹ ${fmt(totals.taxable)}`} />
-        <KpiCard label="Total GST paid"      value={`₹ ${fmt(totals.total)}`} accent />
-      </div>
+   {isGSTUser ? (
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 18 }}>
+    <KpiCard label="Total invoices" value={rows.length} />
+    <KpiCard label="Total taxable value" value={`₹ ${fmt(totals.taxable)}`} />
+    <KpiCard label="Total GST paid" value={`₹ ${fmt(totals.total)}`} accent />
+  </div>
+) : (
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12, marginBottom: 18 }}>
+    <KpiCard label="Total invoices" value={rows.length} />
+    <KpiCard label="Total purchase value" value={`₹ ${fmt(totals.value)}`} />
+  </div>
+)}
 
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", tableLayout: "fixed" }}>
           <colgroup>
-            <col style={{ width: "9.5%" }} />{/* GSTIN */}
-            <col style={{ width: "10%"  }} />{/* Vendor name */}
-            <col style={{ width: "7%"   }} />{/* Invoice no. */}
-            <col style={{ width: "7.5%" }} />{/* Invoice date */}
-            <col style={{ width: "9%"   }} />{/* Place of supply */}
-            <col style={{ width: "8%"   }} />{/* Invoice value */}
-            <col style={{ width: "8%"   }} />{/* Taxable value */}
-            <col style={{ width: "7%"   }} />{/* IGST */}
-            <col style={{ width: "7%"   }} />{/* CGST */}
-            <col style={{ width: "7%"   }} />{/* SGST */}
-            <col style={{ width: "7.5%" }} />{/* Total tax */}
-            <col style={{ width: "5.5%" }} />{/* Tax % */}
-            <col style={{ width: "7%"   }} />{/* ITC eligible */}
+            <col style={{ width: "9.5%" }} />
+            <col style={{ width: "10%"  }} />
+            <col style={{ width: "7%"   }} />
+            <col style={{ width: "7.5%" }} />
+            <col style={{ width: "9%"   }} />
+            <col style={{ width: "8%"   }} />
+            <col style={{ width: "8%"   }} />
+            <col style={{ width: "7%"   }} />
+            <col style={{ width: "7%"   }} />
+            <col style={{ width: "7%"   }} />
+            <col style={{ width: "7.5%" }} />
+            <col style={{ width: "5.5%" }} />
+            <col style={{ width: "7%"   }} />
           </colgroup>
           <thead>
-            {/* ── Group header row ── 2 + 4 + 1 + 4 + 1 + 1 = 13 */}
             <tr>
               <th colSpan={2} style={TH_STYLE}></th>
               <th colSpan={4} style={TH_GROUP_STYLE}>Invoice details from GSTR-2B</th>
@@ -341,60 +716,125 @@ function PurchaseTab({ data, filter }) {
               <th colSpan={1} style={TH_STYLE}></th>
               <th colSpan={1} style={TH_STYLE}></th>
             </tr>
-            {/* ── Column header row ── 13 columns */}
-            <tr>
-              {[
-                "GSTIN",
-                "Vendor name",
-                "Invoice no.",
-                "Invoice date",
-                "Place of supply",
-                "Invoice value",
-                "Taxable value",
-                "IGST",
-                "CGST",
-                "SGST",
-                "Total tax",
-                "Tax %",
-                "ITC eligible",
-              ].map((h) => (
-                <th key={h} style={TH_STYLE}>{h}</th>
-              ))}
-            </tr>
+       <tr>
+  {(isGSTUser
+    ? [
+        "GSTIN",
+        "Vendor name",
+        "Invoice no.",
+        "Invoice date",
+        "Place of supply",
+        "Invoice value",
+        "Taxable value",
+        "IGST",
+        "CGST",
+        "SGST",
+        "Total tax",
+        "Tax %",
+        "ITC eligible",
+      ]
+    : [
+        "Vendor name",
+        "Invoice no.",
+        "Invoice date",
+        "Invoice value",
+      ]
+  ).map((h) => (
+    <th key={h} style={TH_STYLE}>
+      {h}
+    </th>
+  ))}
+</tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <EmptyState colSpan={13} />
             ) : (
-              rows.map((p, i) => {
-                const t = calcTax(p);
-                const eligible = t.gstin.length === 15;
-                return (
-                  <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                    <td style={TD_STYLE}>{t.gstin || "—"}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "left" }}>{t.vendorName}</td>
-                    <td style={TD_STYLE}>{p.supplier_invoice_no || p.order_no || "—"}</td>
-                    <td style={TD_STYLE}>{fmtDate(p.invoice_date)}</td>
-                    <td style={TD_STYLE}>{t.placeOfSupply}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(p.total_amount)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.taxable)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.igst)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.cgst)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(t.sgst)}</td>
-                    <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>₹ {fmt(t.total)}</td>
-                    <td style={{ ...TD_STYLE, color: "#1d4ed8", fontWeight: 600 }}>
-                      {t.taxable ? ((t.total / t.taxable) * 100).toFixed(2) + "%" : "0%"}
-                    </td>
-                    <td style={TD_STYLE}>
-                      <Badge color={eligible ? "green" : "red"}>{eligible ? "Yes" : "No"}</Badge>
-                    </td>
-                  </tr>
-                );
-              })
+       rows.map((p, i) => {
+  const t = calcTax(p);
+  const eligible = t.gstin.length === 15;
+
+  return isGSTUser ? (
+    <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+      <td style={TD_STYLE}>{t.gstin || "—"}</td>
+
+      <td style={{ ...TD_STYLE, textAlign: "left" }}>
+        {t.vendorName}
+      </td>
+
+      <td style={TD_STYLE}>
+        {p.supplier_invoice_no || p.order_no || "—"}
+      </td>
+
+      <td style={TD_STYLE}>
+        {fmtDate(p.invoice_date)}
+      </td>
+
+      <td style={TD_STYLE}>
+        {t.placeOfSupply}
+      </td>
+
+      <td style={{ ...TD_STYLE, textAlign: "right" }}>
+        ₹ {fmt(p.total_amount)}
+      </td>
+
+      <td style={{ ...TD_STYLE, textAlign: "right" }}>
+        ₹ {fmt(t.taxable)}
+      </td>
+
+      <td style={{ ...TD_STYLE, textAlign: "right" }}>
+        ₹ {fmt(t.igst)}
+      </td>
+
+      <td style={{ ...TD_STYLE, textAlign: "right" }}>
+        ₹ {fmt(t.cgst)}
+      </td>
+
+      <td style={{ ...TD_STYLE, textAlign: "right" }}>
+        ₹ {fmt(t.sgst)}
+      </td>
+
+      <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700 }}>
+        ₹ {fmt(t.total)}
+      </td>
+
+      <td style={{ ...TD_STYLE, color: "#1d4ed8", fontWeight: 600 }}>
+        {t.taxable
+          ? ((t.total / t.taxable) * 100).toFixed(2) + "%"
+          : "0%"}
+      </td>
+
+      <td style={TD_STYLE}>
+        <Badge color={eligible ? "green" : "red"}>
+          {eligible ? "Yes" : "No"}
+        </Badge>
+      </td>
+    </tr>
+  ) : (
+    <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+      <td style={{ ...TD_STYLE, textAlign: "left" }}>
+        {t.vendorName}
+      </td>
+
+      <td style={TD_STYLE}>
+        {p.supplier_invoice_no || p.order_no || "—"}
+      </td>
+
+      <td style={TD_STYLE}>
+        {fmtDate(p.invoice_date)}
+      </td>
+
+      <td style={{ ...TD_STYLE, textAlign: "right" }}>
+        ₹ {fmt(p.total_amount)}
+      </td>
+    </tr>
+  );
+})
+             
             )}
           </tbody>
-          {rows.length > 0 && (
-            <tfoot>
+      {rows.length > 0 && isGSTUser && (
+  <tfoot>
               <tr>
                 <td colSpan={5} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Totals</td>
                 <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.value)}</td>
@@ -417,12 +857,6 @@ function PurchaseTab({ data, filter }) {
 }
 
 // ─── Tab: Purchase Return ─────────────────────────────────────────────────────
-// Columns (13 total):
-// [1] GSTIN | [2] Vendor name |
-// -- GSTR-2B group (4): [3] Return/DN no. | [4] Return/DN date | [5] Place of supply | [6] Invoice value --
-// [7] Taxable value |
-// -- Amount of tax group (4): [8] IGST | [9] CGST | [10] SGST | [11] Total tax --
-// [12] Tax % | [13] ITC eligible
 
 function PurchaseReturnTab({ data, filter }) {
   const rows = filterByDate(data, filter, (row) => row.date || row.debit_date);
@@ -452,22 +886,21 @@ function PurchaseReturnTab({ data, filter }) {
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", tableLayout: "fixed" }}>
           <colgroup>
-            <col style={{ width: "9.5%" }} />{/* GSTIN */}
-            <col style={{ width: "10%"  }} />{/* Vendor name */}
-            <col style={{ width: "7.5%" }} />{/* Return/DN no. */}
-            <col style={{ width: "7.5%" }} />{/* Return/DN date */}
-            <col style={{ width: "9%"   }} />{/* Place of supply */}
-            <col style={{ width: "8%"   }} />{/* Invoice value */}
-            <col style={{ width: "8%"   }} />{/* Taxable value */}
-            <col style={{ width: "7%"   }} />{/* IGST */}
-            <col style={{ width: "7%"   }} />{/* CGST */}
-            <col style={{ width: "7%"   }} />{/* SGST */}
-            <col style={{ width: "7.5%" }} />{/* Total tax */}
-            <col style={{ width: "5.5%" }} />{/* Tax % */}
-            <col style={{ width: "6.5%" }} />{/* ITC eligible */}
+            <col style={{ width: "9.5%" }} />
+            <col style={{ width: "10%"  }} />
+            <col style={{ width: "7.5%" }} />
+            <col style={{ width: "7.5%" }} />
+            <col style={{ width: "9%"   }} />
+            <col style={{ width: "8%"   }} />
+            <col style={{ width: "8%"   }} />
+            <col style={{ width: "7%"   }} />
+            <col style={{ width: "7%"   }} />
+            <col style={{ width: "7%"   }} />
+            <col style={{ width: "7.5%" }} />
+            <col style={{ width: "5.5%" }} />
+            <col style={{ width: "6.5%" }} />
           </colgroup>
           <thead>
-            {/* ── Group header row ── 2 + 4 + 1 + 4 + 1 + 1 = 13 */}
             <tr>
               <th colSpan={2} style={TH_STYLE}></th>
               <th colSpan={4} style={TH_GROUP_STYLE}>Return / Debit Note details from GSTR-2B</th>
@@ -476,23 +909,8 @@ function PurchaseReturnTab({ data, filter }) {
               <th colSpan={1} style={TH_STYLE}></th>
               <th colSpan={1} style={TH_STYLE}></th>
             </tr>
-            {/* ── Column header row ── 13 columns */}
             <tr>
-              {[
-                "GSTIN",
-                "Vendor name",
-                "Return / Debit Note no.",
-                "Return / Debit Note date",
-                "Place of supply",
-                "Invoice value",
-                "Taxable value",
-                "IGST",
-                "CGST",
-                "SGST",
-                "Total tax",
-                "Tax %",
-                "ITC eligible",
-              ].map((h) => (
+              {["GSTIN","Vendor name","Return / Debit Note no.","Return / Debit Note date","Place of supply","Invoice value","Taxable value","IGST","CGST","SGST","Total tax","Tax %","ITC eligible"].map((h) => (
                 <th key={h} style={TH_STYLE}>{h}</th>
               ))}
             </tr>
@@ -590,8 +1008,6 @@ function PurchaseSummaryTab({ data, filter }) {
     );
   }, [rows]);
 
-
-
   const totals = useMemo(() => slabs.reduce(
     (acc, r) => ({ taxable: acc.taxable + r.taxable, igst: acc.igst + r.igst, cgst: acc.cgst + r.cgst, sgst: acc.sgst + r.sgst }),
     { taxable: 0, igst: 0, cgst: 0, sgst: 0 }
@@ -619,11 +1035,35 @@ function PurchaseSummaryTab({ data, filter }) {
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
             <thead>
-              <tr>
-                {["GST slab","Taxable value","Integrated tax (IGST)","Central tax (CGST)","State/UT tax (SGST)","Total tax"].map((h) => (
-                  <th key={h} style={TH_STYLE}>{h}</th>
-                ))}
-              </tr>
+         <tr>
+  {(isGSTUser
+    ? [
+        "GSTIN",
+        "Vendor name",
+        "Invoice no.",
+        "Invoice date",
+        "Place of supply",
+        "Invoice value",
+        "Taxable value",
+        "IGST",
+        "CGST",
+        "SGST",
+        "Total tax",
+        "Tax %",
+        "ITC eligible",
+      ]
+    : [
+        "Vendor name",
+        "Invoice no.",
+        "Invoice date",
+        "Invoice value",
+      ]
+  ).map((h) => (
+    <th key={h} style={TH_STYLE}>
+      {h}
+    </th>
+  ))}
+</tr>
             </thead>
             <tbody>
               {slabs.map((s, i) => {
@@ -654,8 +1094,6 @@ function PurchaseSummaryTab({ data, filter }) {
           </table>
         )}
       </div>
-
-   
     </>
   );
 }
@@ -664,138 +1102,92 @@ function PurchaseSummaryTab({ data, filter }) {
 
 function ITCSummaryTab({ purchases, returns, filter }) {
   const filteredPurchases = filterByDate(purchases, filter, "invoice_date");
-  const filteredReturns   = filterByDate(returns,   filter, (r) => r.date || r.debit_date);
+  const filteredReturns   = filterByDate(returns, filter, (r) => r.date || r.debit_date);
 
-  // ── Aggregate from purchases ──────────────────────────────────────────────
   const agg = useMemo(() => {
     let eligIgst = 0, eligCgst = 0, eligSgst = 0;
     let ineligIgst = 0, ineligCgst = 0, ineligSgst = 0;
     let revIgst = 0, revCgst = 0, revSgst = 0;
 
     filteredPurchases.forEach((p) => {
-      const t    = calcTax(p);
-      const elig = t.gstin.length === 15;
-      if (elig) {
-        eligIgst += t.igst; eligCgst += t.cgst; eligSgst += t.sgst;
-      } else {
-        ineligIgst += t.igst; ineligCgst += t.cgst; ineligSgst += t.sgst;
-      }
+      const t = calcTax(p);
+      if (t.gstin.length === 15) { eligIgst += t.igst; eligCgst += t.cgst; eligSgst += t.sgst; }
+      else                        { ineligIgst += t.igst; ineligCgst += t.cgst; ineligSgst += t.sgst; }
     });
 
     filteredReturns.forEach((p) => {
-      const t    = calcTax(p);
-      const elig = t.gstin.length === 15;
-      if (elig) {
-        revIgst += t.igst; revCgst += t.cgst; revSgst += t.sgst;
-      }
+      const t = calcTax(p);
+      if (t.gstin.length === 15) { revIgst += t.igst; revCgst += t.cgst; revSgst += t.sgst; }
     });
 
-    const netIgst = eligIgst - revIgst;
-    const netCgst = eligCgst - revCgst;
-    const netSgst = eligSgst - revSgst;
-
     return {
-      eligIgst, eligCgst, eligSgst,
-      ineligIgst, ineligCgst, ineligSgst,
-      revIgst, revCgst, revSgst,
-      netIgst, netCgst, netSgst,
-      totalElig:   eligIgst + eligCgst + eligSgst,
-      totalInelig: ineligIgst + ineligCgst + ineligSgst,
-      totalRev:    revIgst + revCgst + revSgst,
-      totalNet:    netIgst + netCgst + netSgst,
+      eligible:   { igst: eligIgst,   cgst: eligCgst,   sgst: eligSgst,   total: eligIgst   + eligCgst   + eligSgst   },
+      reversed:   { igst: revIgst,    cgst: revCgst,    sgst: revSgst,    total: revIgst    + revCgst    + revSgst    },
+      ineligible: { igst: ineligIgst, cgst: ineligCgst, sgst: ineligSgst, total: ineligIgst + ineligCgst + ineligSgst },
+      net: {
+        igst: eligIgst - revIgst, cgst: eligCgst - revCgst, sgst: eligSgst - revSgst,
+        total: (eligIgst - revIgst) + (eligCgst - revCgst) + (eligSgst - revSgst),
+      },
     };
   }, [filteredPurchases, filteredReturns]);
 
-  // ── Styles ────────────────────────────────────────────────────────────────
-  const sectionHeader = {
-    padding: "10px 16px", fontSize: "12px", fontWeight: 700,
-    color: "#1e3a8a", background: "#eff6ff",
-    borderTop: "1px solid #e5e7eb", borderBottom: "1px solid #e5e7eb",
-  };
-  const detailLabel = {
-    padding: "11px 16px", fontSize: "12.5px", color: "#374151",
-    borderBottom: "1px solid #f3f4f6", background: "#fff",
-  };
-  const numCell = (color = "#111827") => ({
-    padding: "11px 16px", fontSize: "12.5px", fontWeight: 600,
-    textAlign: "right", color,
-    borderBottom: "1px solid #f3f4f6", background: "#fff",
-  });
-  const totalLabel = {
-    padding: "11px 16px", fontSize: "12.5px", fontWeight: 700,
-    color: "#111827", background: "#f9fafb",
-    borderTop: "2px solid #e5e7eb",
-  };
-  const totalNum = (color = "#1d4ed8") => ({
-    padding: "11px 16px", fontSize: "12.5px", fontWeight: 700,
-    textAlign: "right", color,
-    background: "#f9fafb", borderTop: "2px solid #e5e7eb",
-  });
-
-  const Row = ({ label, igst, cgst, sgst, isTotal, color }) => (
-    <tr>
-      <td style={isTotal ? totalLabel : detailLabel}>{label}</td>
-      <td style={isTotal ? totalNum(color) : numCell(color)}>₹ {fmt(igst)}</td>
-      <td style={isTotal ? totalNum(color) : numCell(color)}>₹ {fmt(cgst)}</td>
-      <td style={isTotal ? totalNum(color) : numCell(color)}>₹ {fmt(sgst)}</td>
-      <td style={isTotal ? totalNum(color) : numCell(color)}>₹ {fmt(igst + cgst + sgst)}</td>
-    </tr>
-  );
-
   return (
     <>
-      {/* KPI strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 18 }}>
-        <KpiCard label="Eligible ITC"   value={`₹ ${fmt(agg.totalElig)}`}   accent />
-        <KpiCard label="Ineligible ITC" value={`₹ ${fmt(agg.totalInelig)}`} danger />
-        <KpiCard label="Reversed ITC"   value={`₹ ${fmt(agg.totalRev)}`}    danger />
-        <KpiCard label="Net ITC"        value={`₹ ${fmt(agg.totalNet)}`}    accent />
+        <KpiCard label="Eligible ITC"  value={`₹ ${fmt(agg.eligible.total)}`}   accent />
+        <KpiCard label="ITC Reversed"  value={`₹ ${fmt(agg.reversed.total)}`}   />
+        <KpiCard label="Ineligible ITC" value={`₹ ${fmt(agg.ineligible.total)}`} danger />
+        <KpiCard label="Net ITC"        value={`₹ ${fmt(agg.net.total)}`}        accent={agg.net.total >= 0} danger={agg.net.total < 0} />
       </div>
 
-      {/* GSTR-3B style table */}
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", tableLayout: "fixed" }}>
           <thead>
-            <tr style={{ background: "#f9fafb" }}>
-              <th style={{ ...TH_STYLE, textAlign: "left", padding: "10px 16px", width: "45%" }}>Details</th>
-              <th style={TH_STYLE}>Integrated Tax (IGST)</th>
-              <th style={TH_STYLE}>Central Tax (CGST)</th>
-              <th style={TH_STYLE}>State/UT Tax (SGST)</th>
-              <th style={TH_STYLE}>Total</th>
+            <tr>
+              <th style={TH_STYLE}>ITC Type</th>
+              <th style={TH_STYLE}>IGST</th>
+              <th style={TH_STYLE}>CGST</th>
+              <th style={TH_STYLE}>SGST</th>
+              <th style={TH_STYLE}>Total ITC</th>
+              <th style={TH_STYLE}>Status</th>
             </tr>
           </thead>
           <tbody>
-            {/* Section A — ITC Available */}
-            <tr><td colSpan={5} style={sectionHeader}>(A) ITC Available (Whether in full or in part)</td></tr>
-            <Row label="(1) Import of goods"                                             igst={0}              cgst={0}              sgst={0} />
-            <Row label="(2) Import of services"                                          igst={0}              cgst={0}              sgst={0} />
-            <Row label="(3) Inward supplies liable for reverse charge (other than 1 & 2)" igst={0}             cgst={0}              sgst={0} />
-            <Row label="(4) Inward supplies from ISD"                                    igst={0}              cgst={0}              sgst={0} />
-            <Row label="(5) All other ITC (from purchases)"                              igst={agg.eligIgst}   cgst={agg.eligCgst}   sgst={agg.eligSgst} />
-
-            {/* Section B — ITC Reversed */}
-            <tr><td colSpan={5} style={sectionHeader}>(B) ITC Reversed</td></tr>
-            <Row label="(1) As per rules 42 & 43 of CGST Rules"                          igst={0}              cgst={0}              sgst={0} />
-            <Row label="(2) Others (purchase returns / debit notes)"                     igst={agg.revIgst}    cgst={agg.revCgst}    sgst={agg.revSgst} />
-
-            {/* Section C — Net ITC */}
-            <tr><td colSpan={5} style={sectionHeader}>(C) Net ITC Available (A) – (B)</td></tr>
-            <Row label="Net eligible ITC"                                                igst={agg.netIgst}    cgst={agg.netCgst}    sgst={agg.netSgst}  color={agg.totalNet >= 0 ? "#15803d" : "#b91c1c"} />
-
-            {/* Section D — Ineligible */}
-            <tr><td colSpan={5} style={sectionHeader}>(D) Ineligible ITC</td></tr>
-            <Row label="(1) As per section 17(5)"                                        igst={agg.ineligIgst} cgst={agg.ineligCgst} sgst={agg.ineligSgst} color="#b91c1c" />
-            <Row label="(5) Others"                                                       igst={0}              cgst={0}              sgst={0} />
-
-            {/* Grand total */}
-            <Row
-              label="Total ITC (Eligible + Ineligible)"
-              igst={agg.eligIgst + agg.ineligIgst}
-              cgst={agg.eligCgst + agg.ineligCgst}
-              sgst={agg.eligSgst + agg.ineligSgst}
-              isTotal color="#1d4ed8"
-            />
+            <tr style={{ background: "#fff" }}>
+              <td style={{ ...TD_STYLE, textAlign: "left" }}>Eligible ITC</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.eligible.igst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.eligible.cgst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.eligible.sgst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700, color: "#15803d" }}>₹ {fmt(agg.eligible.total)}</td>
+              <td style={TD_STYLE}><Badge color="green">Claimable</Badge></td>
+            </tr>
+            <tr style={{ background: "#fafafa" }}>
+              <td style={{ ...TD_STYLE, textAlign: "left" }}>ITC Reversed</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.reversed.igst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.reversed.cgst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.reversed.sgst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700, color: "#b45309" }}>₹ {fmt(agg.reversed.total)}</td>
+              <td style={TD_STYLE}><Badge color="amber">Reversed</Badge></td>
+            </tr>
+            <tr style={{ background: "#fff" }}>
+              <td style={{ ...TD_STYLE, textAlign: "left" }}>Ineligible ITC</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.ineligible.igst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.ineligible.cgst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right" }}>₹ {fmt(agg.ineligible.sgst)}</td>
+              <td style={{ ...TD_STYLE, textAlign: "right", fontWeight: 700, color: "#b91c1c" }}>₹ {fmt(agg.ineligible.total)}</td>
+              <td style={TD_STYLE}><Badge color="red">Not Claimable</Badge></td>
+            </tr>
           </tbody>
+          <tfoot>
+            <tr>
+              <td style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Net ITC Available</td>
+              <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(agg.net.igst)}</td>
+              <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(agg.net.cgst)}</td>
+              <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(agg.net.sgst)}</td>
+              <td style={{ ...TF_STYLE, textAlign: "right", color: agg.net.total >= 0 ? "#1d4ed8" : "#b91c1c" }}>₹ {fmt(agg.net.total)}</td>
+              <td style={TF_STYLE}><Badge color={agg.net.total >= 0 ? "blue" : "red"}>{agg.net.total >= 0 ? "Available" : "Negative"}</Badge></td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </>
@@ -805,22 +1197,27 @@ function ITCSummaryTab({ purchases, returns, filter }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function GSTR2Reports() {
+  const { user } = useAuth();
+
+const isGSTUser =
+  user?.company?.features?.gst;
+  const TABS = isGSTUser
+  ? GST_TABS
+  : NON_GST_TABS;
   const [activeTab,       setActiveTab]       = useState("Purchase");
   const [selectedFilter,  setSelectedFilter]  = useState("This Month");
   const [purchases,       setPurchases]       = useState([]);
   const [purchaseReturns, setPurchaseReturns] = useState([]);
   const [debitNotes,      setDebitNotes]      = useState([]);
   const [loading,         setLoading]         = useState(false);
+  const [exporting,       setExporting]       = useState(null); // "excel" | "pdf" | null
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       try {
         const res = await axios.get("http://localhost:8000/api/purchase");
-        if (res.data.success) {
-          console.log("PURCHASE RECORD SAMPLE 👉", res.data.data?.[0]);
-          setPurchases(res.data.data);
-        }
+        if (res.data.success) setPurchases(res.data.data);
       } catch (err) { console.error("Purchase fetch error:", err); }
       finally { setLoading(false); }
     };
@@ -847,49 +1244,47 @@ export default function GSTR2Reports() {
     load();
   }, []);
 
-  const exportToExcel = () => {
-    const sourceData =
-      activeTab === "Purchase" ? filterByDate(purchases, selectedFilter, "invoice_date") :
-      activeTab === "Purchase Return / Debit Note"
-        ? filterByDate([...purchaseReturns, ...debitNotes], selectedFilter, (row) => row.date || row.debit_date)
-        : filterByDate(purchases, selectedFilter, "invoice_date");
-
-    if (!sourceData.length) return;
-
-    const excelData = sourceData.map((p) => {
-      const t = calcTax(p);
-      return {
-        GSTIN:             t.gstin || "—",
-        "Vendor Name":     t.vendorName,
-        "Invoice No":      activeTab === "Purchase Return / Debit Note"
-                             ? (p.return_no || p.debit_note_no || "—")
-                             : (p.supplier_invoice_no || p.order_no || "—"),
-        "Invoice Date":    fmtDate(activeTab === "Purchase Return / Debit Note" ? (p.date || p.debit_date) : p.invoice_date),
-        "Place of Supply": t.placeOfSupply,
-        "Invoice Value":   p.total_amount,
-        "Taxable Value":   t.taxable,
-        "IGST":            parseFloat(t.igst.toFixed(2)),
-        "CGST":            parseFloat(t.cgst.toFixed(2)),
-        "SGST":            parseFloat(t.sgst.toFixed(2)),
-        "Total Tax":       parseFloat(t.total.toFixed(2)),
-        "ITC Eligible":    t.gstin.length === 15 ? "Yes" : "No",
-      };
-    });
-
-    const ws  = XLSX.utils.json_to_sheet(excelData);
-    const wb  = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, activeTab);
-    const buf  = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([buf], { type: "application/octet-stream" });
-    saveAs(blob, `GSTR2_${activeTab.replace(/ /g, "_")}_${selectedFilter.replace(/ /g, "_")}.xlsx`);
+  // ── Export handlers ──
+  const handleExcelDownload = async () => {
+    setExporting("excel");
+    try {
+      const { data, columns } = buildExportData(activeTab, purchases, purchaseReturns, debitNotes, selectedFilter);
+      const dateRange = getDateRangeLabel(selectedFilter);
+      const file = await generateExcelFile(data, columns, activeTab, dateRange);
+      triggerDownload(file);
+    } catch (err) { console.error(err); alert("Excel export failed"); }
+    finally { setExporting(null); }
   };
 
-  useEffect(() => { window.exportGSTR2Excel = exportToExcel; }, [purchases, purchaseReturns, selectedFilter, activeTab]);
+  const handlePDFDownload = async () => {
+    setExporting("pdf");
+    try {
+      const { data, columns } = buildExportData(activeTab, purchases, purchaseReturns, debitNotes, selectedFilter);
+      const dateRange = getDateRangeLabel(selectedFilter);
+      const file = await generatePDFFile(data, columns, activeTab, dateRange);
+      triggerDownload(file);
+    } catch (err) { console.error(err); alert("PDF export failed"); }
+    finally { setExporting(null); }
+  };
+
+  // Register on window so MainLayout buttons can call them
+  useEffect(() => {
+    window.exportGSTR2Excel = handleExcelDownload;
+    window.exportGSTR2PDF   = handlePDFDownload;
+    return () => {
+      delete window.exportGSTR2Excel;
+      delete window.exportGSTR2PDF;
+    };
+  }, [purchases, purchaseReturns, debitNotes, selectedFilter, activeTab]);
 
   return (
-    <div style={{ minHeight: "100vh", padding: "16px 12px", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 12 }}>
-        <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 10, padding: 4, gap: 3 }}>
+    <div style={{ minHeight: "100vh", padding: "24px", fontFamily: "system-ui, -apple-system, sans-serif", position: "relative", overflow: "visible", zIndex: 1 }}>
+
+      {/* ── Header row ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 12, flexWrap: "wrap" }}>
+
+        {/* Tab pills */}
+        <div style={{ display: "flex", background: "#f3f4f6", borderRadius: 10, padding: 4, gap: 3, flexWrap: "wrap" }}>
           {TABS.map((tab) => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               style={{ padding: "6px 16px", borderRadius: 7, fontSize: "12.5px", fontWeight: 500, border: "none", cursor: "pointer", transition: "all 0.15s", whiteSpace: "normal", lineHeight: "1.2",
@@ -898,31 +1293,69 @@ export default function GSTR2Reports() {
             </button>
           ))}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+
+        {/* Right controls: Download buttons + Date filter */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+
+          {/* Excel download */}
+          <button
+            onClick={handleExcelDownload}
+            disabled={!!exporting}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 13px", borderRadius: 8, fontSize: "12.5px", fontWeight: 500, border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: exporting ? "wait" : "pointer", opacity: exporting && exporting !== "excel" ? 0.5 : 1, transition: "all 0.15s" }}
+            onMouseEnter={e => { if (!exporting) { e.currentTarget.style.background = "#f9fafb"; e.currentTarget.style.borderColor = "#9ca3af"; }}}
+            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#d1d5db"; }}
+          >
+            {exporting === "excel"
+              ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: "spin 1s linear infinite" }}><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+              : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            }
+            {exporting === "excel" ? "Exporting…" : "Download Excel"}
+          </button>
+
+          {/* PDF download */}
+          <button
+            onClick={handlePDFDownload}
+            disabled={!!exporting}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 13px", borderRadius: 8, fontSize: "12.5px", fontWeight: 500, border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: exporting ? "wait" : "pointer", opacity: exporting && exporting !== "pdf" ? 0.5 : 1, transition: "all 0.15s" }}
+            onMouseEnter={e => { if (!exporting) { e.currentTarget.style.background = "#f9fafb"; e.currentTarget.style.borderColor = "#9ca3af"; }}}
+            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#d1d5db"; }}
+          >
+            {exporting === "pdf"
+              ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: "spin 1s linear infinite" }}><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+              : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            }
+            {exporting === "pdf" ? "Exporting…" : "Download PDF"}
+          </button>
+
           <DateFilter selected={selectedFilter} onChange={setSelectedFilter} />
         </div>
       </div>
 
+      {/* Date range label */}
       <div style={{ fontSize: "11.5px", color: "#9ca3af", marginBottom: 16 }}>
         {getDateRangeLabel(selectedFilter)}
       </div>
 
+      {/* Loading */}
       {loading && (
         <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af", fontSize: "13px" }}>Loading data…</div>
       )}
 
+      {/* Tab content */}
       {!loading && (
         <>
-          {activeTab === "Purchase" &&
-            <PurchaseTab data={purchases} filter={selectedFilter} />}
-          {activeTab === "Purchase Return / Debit Note" &&
-            <PurchaseReturnTab data={[...purchaseReturns, ...debitNotes]} filter={selectedFilter} />}
-          {activeTab === "Purchase Summary" &&
-            <PurchaseSummaryTab data={purchases} filter={selectedFilter} />}
-          {activeTab === "ITC Summary" &&
-            <ITCSummaryTab purchases={purchases} returns={[...purchaseReturns, ...debitNotes]} filter={selectedFilter} />}
+          {activeTab === "Purchase"                        && <PurchaseTab
+  data={purchases}
+  filter={selectedFilter}
+  isGSTUser={isGSTUser}
+/>}
+          {activeTab === "Purchase Return / Debit Note"    && <PurchaseReturnTab data={[...purchaseReturns, ...debitNotes]} filter={selectedFilter} />}
+          {activeTab === "Purchase Summary"                && <PurchaseSummaryTab data={purchases}                         filter={selectedFilter} />}
+          {activeTab === "ITC Summary"                     && <ITCSummaryTab      purchases={purchases} returns={[...purchaseReturns, ...debitNotes]} filter={selectedFilter} />}
         </>
       )}
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

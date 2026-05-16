@@ -317,10 +317,19 @@ const formatted = res.data.data.map((p) => ({
 
   amount: p.total_amount,
 
+pendingAmount:
+  (p.total_amount || 0) -
+  (p.paid_amount || 0),
+
   status:
     p.payment_status || "Unpaid",
 
+        note: p.remark || p.remarks || p.note || "-",  
+
+
   paid_amount: p.paid_amount || 0,
+
+
 
   items: (p.details || []).map(
     (it) => ({
@@ -343,39 +352,19 @@ const formatted = res.data.data.map((p) => ({
     const res = await axios.get("http://localhost:8000/api/payment-out");
 
     if (res.data.success) {
-  const formatted = res.data.data.map(
-  (p, index) => ({
-    id: p._id,
-
-    srNo: index + 1,
-
-    vendor:
-      p.vendor_id?.vendor_name ||
-      p.vendor_id?.company_name ||
-      p.vendor ||
-      p.vendor_name ||
-      p.party_name ||
-      "Vendor",
-
-    companyName:
-      p.vendor_id?.company_name ||
-      "-",
-
-    refNo: p.payment_no,
-
-    date: new Date(
-      p.date
-    ).toLocaleDateString("en-GB"),
-
-    rawDate: p.date,
-
-    method: p.payment_mode,
-
-    amount: p.amount,
-
-    status: "Paid",
-  })
-);
+const formatted = res.data.data.map((p, index) => ({
+  id: p._id,
+  srNo: index + 1,
+  vendor: p.vendor_id?.vendor_name || p.vendor_id?.company_name || "Vendor",
+  companyName: p.vendor_id?.company_name || "-",
+  refNo: p.payment_no,
+  date: new Date(p.date).toLocaleDateString("en-GB"),
+  rawDate: p.date,
+  method: p.payment_mode,
+  amount: p.amount,
+  note: p.remark || p.remarks || p.note || "-",  // ✅ ADD THIS
+  status: "Paid",
+}));
 
       setPayments(formatted);
     }
@@ -445,12 +434,15 @@ const formatted = res.data.data.map((p) => ({
         {isInvoice ? (
           <>
             {/* ↓ Added 90px column for Pay button before the actions column */}
-            <div className="grid grid-cols-[1fr_1fr_140px_130px_130px_120px_90px_40px] border-b border-gray-200 bg-gray-50 px-6">
+            <div className="grid grid-cols-[1fr_1fr_140px_130px_130px_130px_120px_90px_40px] border-b border-gray-200 bg-gray-50 px-6">
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Vendor</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Company</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice No</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right pr-6">Amount</div>
+              <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right pr-6">
+  Pending
+</div>
               <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">Status</div>
               <div className="py-3" />
               <div className="py-3" />
@@ -465,7 +457,7 @@ const formatted = res.data.data.map((p) => ({
               return (
                 <div key={inv.id} className={!isLast ? "border-b border-gray-100" : ""}>
                   <div
-                    className={`grid grid-cols-[1fr_1fr_140px_130px_130px_120px_90px_40px] px-6 items-center transition-colors cursor-pointer
+                    className={`grid grid-cols-[1fr_1fr_140px_130px_130px_130px_120px_90px_40px] px-6 items-center transition-colors cursor-pointer
                       ${selectedInvoice?.id === inv.id ? "bg-blue-50/60" : "hover:bg-gray-50"}`}
                     onClick={() => setSelectedInvoice(inv)}
                   >
@@ -484,6 +476,11 @@ const formatted = res.data.data.map((p) => ({
                     <div className="py-4 text-right pr-6">
                       <p className="text-sm font-semibold text-gray-800 tabular-nums">{fmt(inv.amount)}</p>
                     </div>
+                    <div className="py-4 text-right pr-6">
+  <p className="text-sm font-semibold text-red-600 tabular-nums">
+    {fmt(inv.pendingAmount)}
+  </p>
+</div>
                     <div className="py-4 flex items-center justify-center">
 <StatusBadge status={inv.status} />
                     </div>
@@ -541,13 +538,18 @@ const formatted = res.data.data.map((p) => ({
   Method
 </div>
 
+
+<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+  Note
+</div>
+
 <div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-right pr-6">
   Amount
 </div>
 
-<div className="py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">
-  Status
-</div>
+
+
+
             </div>
 
             {filteredPayables.length === 0 && (
@@ -586,23 +588,16 @@ const formatted = res.data.data.map((p) => ({
   {pay.method}
 </div>
 
+<div className="py-4 text-sm text-gray-500 truncate">
+  {pay.note || "-"}
+</div>
+          
+
 <div className="py-4 text-sm font-semibold text-gray-800 text-right pr-6 tabular-nums">
   {fmt(pay.amount)}
 </div>
 
-<div className="py-4 flex justify-center">
-  <span
-    className={`text-[10px] font-semibold px-2 py-0.5 rounded
-      ${
-        pay.status === "Paid"
-          ? "bg-green-50 text-green-700"
-          : "bg-amber-50 text-amber-700"
-      }`}
-  >
-    {pay.status}
-  </span>
-</div>
-              </div>
+    </div>
             ))}
           </>
         )}

@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
 import axios from "axios";
 import SearchSelect from "../../components/SearchSelect";
 import Modal from "../../components/Modal";
-import { useParams, useNavigate } from "react-router-dom";
 import ItemsTable from "../../components/ItemsTable";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -453,6 +454,11 @@ function ShippingAddressModal({ vendorForm, setVendorForm, onStateChange, onClos
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function PurchaseInvoice() {
+
+  const { user } = useAuth();
+
+const isGSTUser =
+  user?.company?.features?.gst;
   const { id }   = useParams();
   const navigate = useNavigate();
   const isEdit   = !!id;
@@ -575,8 +581,13 @@ const removeItem = (i) => items.length > 1 && setItems(items.filter((_, idx) => 
   const subtotal      = items.reduce((s, i) => s + i.qty * i.purchasePrice, 0);
   const totalDiscount = items.reduce((s, i) => s + (i.discount||0) + (i.extraDiscount||0), 0);
   const taxableAmount = subtotal - totalDiscount;
-  const totalTax      = items.reduce((s, i) => { const t = itemTaxBreakup(i); return s + t.cgst + t.sgst + t.igst; }, 0);
-  const beforeRound   = taxableAmount + totalTax + Number(otherCharges);
+const totalTax = isGSTUser
+  ? items.reduce((s, i) => {
+      const t = itemTaxBreakup(i);
+      return s + t.cgst + t.sgst + t.igst;
+    }, 0)
+  : 0;
+    const beforeRound   = taxableAmount + totalTax + Number(otherCharges);
   const grandTotal    = Math.round(Number(beforeRound) || 0);
   const roundOff      = grandTotal - beforeRound;
 
@@ -634,8 +645,9 @@ const removeItem = (i) => items.length > 1 && setItems(items.filter((_, idx) => 
   hsn: it.hsn || "",
   unit: it.unit || "NOS",
 
-  gstRate: Number(it.gst_rate) || 18,
-  itemType: it.item_type || "Goods",
+gstRate: isGSTUser
+  ? Number(it.gst_rate) || 18
+  : 0,  itemType: it.item_type || "Goods",
 
   sku: it.sku || "",
   size: it.size || "",
@@ -687,7 +699,9 @@ const removeItem = (i) => items.length > 1 && setItems(items.filter((_, idx) => 
       details: items.map(it => ({
         product_name: it.name, product_id: it.product_id ?? it._id ?? it.id, item_type: it.itemType,
         sku: it.sku, hsn: it.hsn, unit: it.unit, qty: it.qty,
-        price: it.purchasePrice, discount: it.discount||0, gst_rate: it.gstRate||18, amount: itemTotal(it),
+        price: it.purchasePrice, discount: it.discount||0, gst_rate: isGSTUser
+  ? (it.gstRate || 18)
+  : 0, amount: itemTotal(it),
       })),
       sub_total: subtotal, total_discount: totalDiscount, taxable_amount: taxableAmount,
       total_tax: totalTax, other_charges: Number(otherCharges)||0,
@@ -784,9 +798,10 @@ if (Number(amountPaid) > 0 && selectedVendor?._id) {
               </div>
             )}
           </div>
-
-          {/* SHIP FROM */}
-          <div style={{ flex: 1, padding: "16px 18px", display: "flex", flexDirection: "column", gap: "10px" }}>
+{isGSTUser && (
+  <>
+    {/* SHIP FROM */}
+    <div style={{ flex: 1, padding: "16px 18px", display: "flex", flexDirection: "column", gap: "10px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: "12px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>Ship From</span>
               {selectedVendor && (
@@ -819,10 +834,12 @@ if (Number(amountPaid) > 0 && selectedVendor?._id) {
               </div>
             )}
           </div>
+  </>
+)}
         </div>
 
-     {/* INVOICE DETAILS */}
-<div style={{ padding: "20px" }}>
+      {/* INVOICE DETAILS */}
+      <div style={{ padding: "20px" }}>
   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
     <div>
       <label style={{ fontSize: "12px", color: "#6b7280" }}>Supplier Invoice No</label>
@@ -836,13 +853,26 @@ if (Number(amountPaid) > 0 && selectedVendor?._id) {
       <label style={{ fontSize: "12px", color: "#6b7280" }}>Entry Date</label>
       <input type="date" value={entryDate||""} onChange={e => setEntryDate(e.target.value)} style={inputStyle} />
     </div>
-    <div>
-      <label style={{ fontSize: "12px", color: "#6b7280" }}>Reverse Charge</label>
-      <select value={reverseCharge||"No"} onChange={e => setReverseCharge(e.target.value)} style={inputStyle}>
-        <option>No</option><option>Yes</option>
-      </select>
-    </div>
+ {isGSTUser && (
+  <div>
+    <label style={{ fontSize: "12px", color: "#6b7280" }}>
+      Reverse Charge
+    </label>
 
+    <select
+      value={reverseCharge||"No"}
+      onChange={e => setReverseCharge(e.target.value)}
+      style={inputStyle}
+    >
+      <option>No</option>
+      <option>Yes</option>
+    </select>
+  </div>
+)}
+
+
+{isGSTUser && (
+  <>
     {/* ── NEW: ITC Eligible ── */}
     <div style={{ gridColumn: "span 2" }}>
       <label style={{ fontSize: "12px", color: "#6b7280" }}>ITC Eligible</label>
@@ -874,7 +904,12 @@ if (Number(amountPaid) > 0 && selectedVendor?._id) {
             : "Add vendor GSTIN to claim ITC"}
         </span>
       </div>
-    </div>
+     </div>
+  </>
+)}
+
+
+
 
   </div>
   <div style={{ marginTop: "12px" }}>
@@ -886,8 +921,10 @@ if (Number(amountPaid) > 0 && selectedVendor?._id) {
 
       {/* ── Items / Stock ── */}
       <Section title="Items / Stock">
-      <ItemsTable
-  items={items} itemList={itemList}
+  <ItemsTable
+  items={items}
+  itemList={itemList}
+  isGSTUser={isGSTUser}
   updateItem={updateItem} removeItem={removeItem} addItems={addItems}
   itemTaxable={itemTaxable} itemTaxBreakup={itemTaxBreakup} itemTotal={itemTotal}
   isSales={false}
@@ -969,7 +1006,8 @@ if (Number(amountPaid) > 0 && selectedVendor?._id) {
         </div>
 
         {/* HSN Tax Summary */}
-        {Object.keys(taxSummary).length > 0 && (
+        {isGSTUser &&
+ Object.keys(taxSummary).length > 0 && (
           <div style={{ marginTop: "20px" }}>
             <div style={{ fontSize: "12px", fontWeight: 700, color: "#374151", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "8px" }}>Tax Summary (HSN Wise)</div>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px", border: "1px solid #e5e7eb" }}>

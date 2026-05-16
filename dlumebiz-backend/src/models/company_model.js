@@ -30,6 +30,45 @@ const companySchema = new Schema({
   createdOn: { type: Date },
   createdBy: { type: String },
   updatedBy: { type: String },
+  plan_type: {
+  type: String,
+  enum: ["NON_GST", "GST"],
+  default: "NON_GST",
+},
+
+subscription_status: {
+  type: String,
+  enum: ["TRIAL", "ACTIVE", "EXPIRED"],
+  default: "TRIAL",
+},
+
+subscription_expiry: {
+  type: Date,
+},
+
+plan_duration_months: {
+  type: Number,
+  default: 1,
+},
+
+features: {
+
+  gst: {
+    type: Boolean,
+    default: false,
+  },
+
+  inventory: {
+    type: Boolean,
+    default: true,
+  },
+
+  reports: {
+    type: Boolean,
+    default: true,
+  },
+
+},
 });
 
 companySchema.pre("save", function (next) {

@@ -10,8 +10,10 @@
     HiOutlineUser,
     HiOutlineClipboardList,
   } from "react-icons/hi";
-  import { FiPlus } from "react-icons/fi";
-
+import {
+  FiPlus,
+  FiLogOut
+} from "react-icons/fi";
 
   import { HiOutlineBuildingOffice } from "react-icons/hi2";
 
@@ -25,34 +27,71 @@
 
   /* Sidebar Navigation */
 
-  const navItems = [
+
+
+  const MainLayout = () => {
+const { user, logout } = useAuth();
+    const isGSTUser =
+  user?.company?.features?.gst;
+
+    const navItems = [
     { label: "Home", icon: HiOutlineHome, path: "/dashboard" },
 
-  {
-    label: "Sales",
+...(isGSTUser
+  ? [{
+      label: "Sales",
+      icon: HiOutlineDocumentText,
+      children: [
 
-    icon: HiOutlineDocumentText,
-    children: [
-      { label: "Sales Invoices", path: "/sales-invoice-list" },
-      { label: "Sales Return", path: "/sales-return" },
-      { label: "Credit Note", path: "/credit-note" },
+        {
+          label: "Sales Invoices",
+          path: "/sales-invoice-list",
+        },
 
-    
-    ],
-  },
+        {
+          label: "Sales Return",
+          path: "/sales-return",
+        },
 
-  {
-    label: "Purchase",
-    icon: HiOutlineDocumentText,
-    children: [
-      { label: "Purchase Invoices", path: "/purchase-invoice-list" },
-      { label: "Purchase Return", path: "/purchase-return-list" },
-      { label: "Debit Note", path: "/debit-note" },
+        {
+          label: "Credit Note",
+          path: "/credit-note",
+        },
+      ],
+    }]
+  : [{
+      label: "Sales Invoices",
+      icon: HiOutlineDocumentText,
+      path: "/sales-invoice-list",
+    }]),
 
+...(isGSTUser
+  ? [{
+      label: "Purchase",
+      icon: HiOutlineDocumentText,
+      children: [
 
-    ],
-  },
+        {
+          label: "Purchase Invoices",
+          path: "/purchase-invoice-list",
+        },
 
+        {
+          label: "Purchase Return",
+          path: "/purchase-return-list",
+        },
+
+        {
+          label: "Debit Note",
+          path: "/debit-note",
+        },
+      ],
+    }]
+  : [{
+      label: "Purchase Invoices",
+      icon: HiOutlineDocumentText,
+      path: "/purchase-invoice-list",
+    }]),
     {
       label: "Items",
       icon: HiOutlineClipboardList,
@@ -74,36 +113,63 @@
     {
       label: "My Stores",
       icon: HiOutlineBuildingOffice,
-      path: "/stores",
+      path: "/my-stores",
     },
 
-    {
-    label: "Reports",
-    icon: HiOutlineDocumentText,
-    children: [
+...(isGSTUser
+  ? [{
+      label: "Reports",
+      icon: HiOutlineDocumentText,
+      children: [
+        {
+          label: "Sales Reports",
+          path: "/reports/gstr1-sales",
+        },
+
+        {
+          label: "Purchase Reports",
+          path: "/reports/gstr2-purchase",
+        },
+      ],
+    }]
+  : [
+
       {
         label: "Sales Reports",
+        icon: HiOutlineDocumentText,
         path: "/reports/gstr1-sales",
       },
 
       {
         label: "Purchase Reports",
+        icon: HiOutlineDocumentText,
         path: "/reports/gstr2-purchase",
       },
-    ],
-  },
+
+    ]),
 
   
   ];
-
-  const MainLayout = () => {
-    const { user } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
     const [openMenu, setOpenMenu] = useState(null);
     const [openSubMenu, setOpenSubMenu] = useState(null);
 
     const daysLeft = getDaysLeft();
+
+    const handleLogout = () => {
+
+  const confirmLogout =
+    window.confirm(
+      "Are you sure you want to logout?"
+    );
+
+  if (!confirmLogout) return;
+
+  logout();
+
+  navigate("/");
+};
 
     const isRouteActive = (path) => {
       return (
@@ -245,23 +311,7 @@
       "/reports/gstr2-purchase": {
         title: "Purchase Reports",
         subtitle: "View GST purchase report details.",
-        actions: (
-          <div className="flex gap-3">
-          
-            <button
-              onClick={() => window.exportGSTR2Excel?.()}
-              className="top-btn"
-            >
-              <HiOutlineDownload size={16} /> Download Excel
-            </button>
-          <button
-  onClick={() => window.exportGSTR2PDF?.()} 
-    className="top-btn"
-  >
-    <HiOutlinePrinter size={16} /> Download PDF
-  </button>
-          </div>
-        ),
+    
       },
 
 "/reports/gstr1-sales": {
@@ -442,6 +492,19 @@
               );
             })}
           </nav>
+
+          <div className="p-3 border-t border-gray-200">
+
+  <button
+    onClick={handleLogout}
+    className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition"
+  >
+    <FiLogOut size={18} />
+
+    <span>Logout</span>
+  </button>
+
+</div>
         </aside>
 
         {/* Main Content */}
@@ -545,13 +608,6 @@
       </svg>
     </div>
 
-    {/* Avatar */}
-    <div
-      onClick={() => navigate("/profile")}
-      className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-[#1e3a8a] cursor-pointer"
-    >
-      {user?.email?.charAt(0)?.toUpperCase() || "U"}
-    </div>
 
   </div>
 )}

@@ -6,7 +6,6 @@ import ProtectedRoute from "./ProtectedRoute";
 import MainLayout from "../layout/MainLayout";
 import Customers from "../pages/Customers/Customers";
 import InvoiceDetail from "../pages/Invoices/InvoiceDetail";
-import Profile from "../pages/Profile/Profile";
 import CustomerList from "../pages/Customers/CustomerList";
 import Customerdetails from "../pages/Customers/Customerdetails";
 import VendorList from "../pages/Vendors/VendorList";
@@ -34,7 +33,7 @@ import CreditNoteList from "../pages/Sales/Creditnotelist";
 import CreateCreditNote from "../pages/Sales/CreateCreditNote";
 import GSTR1Reports from "../pages/Reports/Gstr1reports";
 import SubscriptionPage from "../pages/Profile/SubscriptionPage";
-
+import MyStore from "../pages/Stores/MyStores";
 
 
 const AppRoutes = () => {
@@ -52,7 +51,6 @@ const AppRoutes = () => {
           <Route path="/invoices" element={<Invoices />} />
           <Route path="customers" element={<Customers />} />
           <Route path="invoice/:id" element={<InvoiceDetail />} />
-          <Route path="/profile" element={<Profile />} />
           <Route path="/customer-list" element={<CustomerList />} />
           <Route path="/customers/:id" element={<Customerdetails />} />
        <Route path="/vendor-list" element={<VendorList />} />
@@ -81,6 +79,7 @@ const AppRoutes = () => {
 <Route path="/credit-note/new" element={<CreateCreditNote />} />
 <Route path="/reports/gstr1-sales" element={<GSTR1Reports />} />
 <Route path="/subscription" element={<SubscriptionPage />} />
+<Route path="/my-stores" element={<MyStore/>}/>
         </Route>
 
       </Route>

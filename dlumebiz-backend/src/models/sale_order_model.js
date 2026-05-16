@@ -16,7 +16,11 @@ async function generateInvoiceNo(company_id, invoice_type) {
 }
 
 const saleOrderSchema = new Schema({
-  company_id: { type: Types.ObjectId, ref: "Company" },
+company_id: {
+  type: Types.ObjectId,
+  ref: "Company",
+  required: true,
+},
   client_id: { type: Types.ObjectId, ref: "Client" },
   customer_name: { type: String, default: "" },
 contact_no: { type: String, default: "" },
@@ -24,12 +28,24 @@ contact_no: { type: String, default: "" },
   shipment_date: { type: Date, default: Date.now },
   invoice_date: { type: Date },   
 due_date: { type: Date }, 
-  invoice_no: { type: String, default: "" },
-  invoice_type: { type: String, default: "" },
-  invoice_category: {
+  invoice_no: {
   type: String,
-  enum: ["B2B", "B2CL", "B2CS"],
-  default: "B2CS",
+  default: "",
+  unique: true,
+  index: true,
+},
+  invoice_type: { type: String, default: "" },
+invoice_category: {
+  type: String,
+
+  enum: [
+    "B2B",
+    "B2CL",
+    "B2CS",
+    "NON_GST",
+  ],
+
+  default: "NON_GST",
 },
 
 gstin: {
@@ -61,7 +77,7 @@ enum: ["pending", "in_progress", "completed", "Paid", "Unpaid", "Partial"],
   discounted_amount: { type: Number },
   total_amount: { type: Number },
   paid_amount: { type: Number, default: 0 },
-  advance_amount: { type: Number, default: '0' },  
+  advance_amount: { type: Number, default: 0 },  
   payment_method: { type: String, default: "Cash" },
   transaction_no: { type: String, default: ''},
   card_no: { type: String, default: ''},
@@ -107,17 +123,64 @@ saleOrderSchema.pre("save", async function (next) {
 
     this.invoice_no = await generateInvoiceNo(this.company_id, this.invoice_type);
   }
+this.balance_amount = Math.max(
+  0,
+  (this.total_amount || 0) -
+  (this.paid_amount || 0)
+);
 
-  this.balance_amount = (this.total_amount || 0) - (this.paid_amount || 0);
-
+if ((this.paid_amount || 0) <= 0) {
+  this.status = "Unpaid";
+} else if (
+  (this.paid_amount || 0) >=
+  (this.total_amount || 0)
+) {
+  this.status = "Paid";
+} else {
+  this.status = "Partial";
+}
   next();
 });
 
 saleOrderSchema.pre("findOneAndUpdate", function (next) {
   const update = this.getUpdate();
+
   delete update._id;
-   const nowIST = new Date(new Date().getTime() + 5.5 * 60 * 60 * 1000); // IST
-  this.updatedOn = nowIST;
+
+  const nowIST = new Date(
+    new Date().getTime() + 5.5 * 60 * 60 * 1000
+  );
+
+  update.updatedOn = nowIST;
+
+  if (
+    update.total_amount !== undefined ||
+    update.paid_amount !== undefined
+  ) {
+
+    const total =
+      update.total_amount ??
+      this._update.total_amount ??
+      0;
+
+    const paid =
+      update.paid_amount ??
+      this._update.paid_amount ??
+      0;
+
+update.balance_amount = Math.max(
+  0,
+  total - paid
+);
+    if (paid <= 0) {
+      update.status = "Unpaid";
+    } else if (paid >= total) {
+      update.status = "Paid";
+    } else {
+      update.status = "Partial";
+    }
+  }
+
   next();
 });
 
