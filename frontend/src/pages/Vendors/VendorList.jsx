@@ -53,7 +53,9 @@ const VendorList = () => {
     v.state,
   ].filter(Boolean).join(", ") || "-",
   phone: v.contact_no_1 || "-",
-  payable: v.pending_amount || 0,
+payable:
+  Number(v.pending_amount || 0) +
+  Number(v.opening_balance || 0),
 }));
 
 const exportColumns = [
@@ -241,8 +243,10 @@ address: (
 ),
 
 phone: v.contact_no_1 || "-",        
-  payable: `₹${(v.pending_amount || 0).toLocaleString("en-IN")}`,
-}))}
+payable: `₹${(
+  Number(v.pending_amount || 0) +
+  Number(v.opening_balance || 0)
+).toLocaleString("en-IN")}`,}))}
 
   searchPlaceholder="Search vendors..."
 

@@ -45,8 +45,8 @@ const staffController = {
       const userData = {
         company_id: data.company_id,
         name: `${data.first_name} ${data.last_name}`,
-        password: data.password, 
-        phoneNumber: data.contact_no1,
+        password: data.password || "123456",
+        phoneNumber: data.contact_no_1,
         address: `${data.address_line_1} ${data.address_line_2 || ""}`.trim(),
         city: data.city,
         state: data.state,

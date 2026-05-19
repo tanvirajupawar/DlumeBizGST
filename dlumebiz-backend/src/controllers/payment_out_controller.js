@@ -36,16 +36,44 @@ exports.createPayment = async (req, res) => {
     }
 
     if (!invoice_ids || invoice_ids.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No invoices selected",
-      });
-    }
+  return res.status(400).json({
+    success: false,
+    message: "No invoices selected",
+  });
+}
 
-    const paid = Number(amount);
-    let remaining = paid;
+ const paid = Number(amount);
+let remaining = paid;
 
-    console.log("💰 PAYMENT:", paid);
+// 🔥 GET VENDOR
+const vendor = await Vendor.findById(vendor_id);
+
+// 🔥 CLEAR OPENING BALANCE FIRST
+if (
+  vendor &&
+  Number(vendor.opening_balance || 0) > 0 &&
+  remaining > 0
+) {
+
+  const openingDue =
+    Number(vendor.opening_balance);
+
+  const openingPay =
+    Math.min(openingDue, remaining);
+
+  vendor.opening_balance =
+    openingDue - openingPay;
+
+  remaining -= openingPay;
+
+  await vendor.save();
+}
+
+console.log("💰 PAYMENT:", paid);
+
+
+
+
 
     // 🔥 FETCH INVOICES (BOTTOM FIRST)
     const invoices = await Purchase.find({
@@ -74,30 +102,48 @@ exports.createPayment = async (req, res) => {
       await inv.save();
     }
 
-    // 🔥 UPDATE VENDOR PENDING
-    const totalPending = await Purchase.aggregate([
-      { $match: { vendor_id: new mongoose.Types.ObjectId(vendor_id) } },
-      {
-        $project: {
-          balance: {
-            $subtract: [
-              "$total_amount",
-              { $ifNull: ["$paid_amount", 0] },
-            ],
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: "$balance" },
-        },
-      },
-    ]);
 
-    await Vendor.findByIdAndUpdate(vendor_id, {
-      pending_amount: totalPending[0]?.total || 0,
-    });
+
+// 🔥 PURCHASE PENDING
+const totalPending = await Purchase.aggregate([
+  {
+    $match: {
+      vendor_id: new mongoose.Types.ObjectId(vendor_id),
+    },
+  },
+  {
+    $project: {
+      balance: {
+        $subtract: [
+          "$total_amount",
+          { $ifNull: ["$paid_amount", 0] },
+        ],
+      },
+    },
+  },
+  {
+    $group: {
+      _id: null,
+      total: { $sum: "$balance" },
+    },
+  },
+]);
+
+// 🔥 OPENING BALANCE REMAINING
+const openingBalance =
+  Number(vendor?.opening_balance || 0);
+
+// 🔥 TOTAL PAYABLE
+const finalPending =
+  openingBalance +
+  Number(totalPending[0]?.total || 0);
+
+// 🔥 UPDATE VENDOR
+await Vendor.findByIdAndUpdate(vendor_id, {
+  pending_amount: finalPending,
+});
+
+
 
     // 🔥 CREATE PAYMENT RECORD
     const count = await PaymentOut.countDocuments();

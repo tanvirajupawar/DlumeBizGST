@@ -393,8 +393,15 @@ const TableView = ({ cols, rows, onRowClick }) => (
         {rows.length === 0 ? (
           <tr><td colSpan={cols.length} className="px-4 py-10 text-center text-sm text-gray-400">No records found</td></tr>
         ) : rows.map((row, i) => (
-          <tr key={i} onClick={() => onRowClick && onRowClick(row)}
-            className={`border-b border-gray-100 last:border-0 transition ${onRowClick ? "hover:bg-gray-50/60 cursor-pointer" : ""}`}>
+<tr
+  key={i}
+  onClick={() => onRowClick && onRowClick(row)}
+  className={`
+    border-b border-gray-100 last:border-0 transition
+    ${row.rowClassName || ""}
+    ${onRowClick ? "hover:bg-gray-50/60 cursor-pointer" : ""}
+  `}
+>
             {cols.map((c) => (
               <td key={c.key} className="px-4 py-[11px] text-gray-700">{c.render ? c.render(row, i) : row[c.key]}</td>
             ))}
@@ -515,13 +522,52 @@ function TransactionsTab({ vendorId, vendor, showFilter, setShowFilter, selected
   const [selected, setSelected]                     = useState([]);
   const [showPayModal, setShowPayModal]             = useState(false);
 
-  const fetchInvoices = async () => {
-    if (!vendorId) return;
-    try {
-      const res = await axios.get(`http://localhost:8000/api/purchase?vendor_id=${vendorId}`);
-      if (res.data.success) setInvoices(res.data.data);
-    } catch (err) { console.error(err); }
-  };
+const fetchInvoices = async () => {
+  if (!vendorId) return;
+
+  try {
+
+    const res = await axios.get(
+      `http://localhost:8000/api/purchase?vendor_id=${vendorId}`
+    );
+
+    let invoiceData = res.data.data || [];
+    
+
+    // 🔥 ADD OPENING BALANCE AS INVOICE
+    if (Number(vendor?.opening_balance || 0) > 0) {
+
+      invoiceData = [
+        {
+          _id: "opening-balance",
+
+          supplier_invoice_no: "OPENING BALANCE",
+
+          invoice_date:
+            vendor.createdAt || new Date(),
+
+          total_amount:
+            Number(vendor.opening_balance),
+
+          paid_amount: 0,
+
+          payment_status: "Unpaid",
+
+          isOpeningBalance: true,
+        },
+
+        ...invoiceData,
+      ];
+    }
+
+    setInvoices(invoiceData);
+
+  } catch (err) {
+
+    console.error(err);
+
+  }
+};
 
   useEffect(() => { setLoading(true); fetchInvoices().finally(() => setLoading(false)); }, [vendorId]);
   useEffect(() => {
@@ -618,18 +664,43 @@ function TransactionsTab({ vendorId, vendor, showFilter, setShowFilter, selected
     },
     {
       key: "payment_status", label: "Status",
-      render: r => {
-        const bal = getBalance(r); const total = Number(r.total_amount || 0);
-        const status = bal === 0 ? "Paid" : bal < total ? "Partial" : "Unpaid";
-        return (
-          <span className={`inline-block px-2.5 py-[3px] text-[12px] font-medium rounded-full border
-            ${status === "Paid" ? "bg-green-100 text-green-800 border-green-300"
-              : status === "Unpaid" ? "bg-red-100 text-red-700 border-red-200"
-              : "bg-yellow-100 text-yellow-800 border-yellow-300"}`}>
-            {status}
-          </span>
-        );
-      },
+ render: r => {
+
+  if (r.isOpeningBalance) {
+
+    return (
+      <span className="inline-block px-2.5 py-[3px] text-[12px] font-medium rounded-full border bg-orange-100 text-orange-700 border-orange-300">
+        Opening
+      </span>
+    );
+  }
+
+  const bal = getBalance(r);
+
+  const total = Number(r.total_amount || 0);
+
+  const status =
+    bal === 0
+      ? "Paid"
+      : bal < total
+      ? "Partial"
+      : "Unpaid";
+
+  return (
+    <span
+      className={`inline-block px-2.5 py-[3px] text-[12px] font-medium rounded-full border
+      ${
+        status === "Paid"
+          ? "bg-green-100 text-green-800 border-green-300"
+          : status === "Unpaid"
+          ? "bg-red-100 text-red-700 border-red-200"
+          : "bg-yellow-100 text-yellow-800 border-yellow-300"
+      }`}
+    >
+      {status}
+    </span>
+  );
+}
     },
    
   ];
@@ -663,6 +734,8 @@ function TransactionsTab({ vendorId, vendor, showFilter, setShowFilter, selected
       {loading
         ? <p className="text-sm text-gray-400 py-8 text-center">Loading...</p>
         : <TableView cols={cols} rows={invoices} onRowClick={(row) => {
+
+          if (row.isOpeningBalance) return;
             setSelectedInvoice({
               ...row,
               invoiceNo: row.supplier_invoice_no,
@@ -891,9 +964,18 @@ function ProfileTab({ vendor, onVendorUpdate }) {
 // ── Tab: Ledger ───────────────────────────────────────────────────────────────
 function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
   const [entries, setEntries] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState({ totalPayable: 0, dateRange: "" });
+  const vendorName =
+  vendor?.vendor_name ||
+  vendor?.company_name ||
+  "Vendor";
 
+  const [loading, setLoading] = useState(true);
+const [summary, setSummary] = useState({
+  totalPurchase: 0,
+  totalPaid: 0,
+  totalPayable: 0,
+  dateRange: "",
+});
   useEffect(() => {
     if (!vendorId) return;
     setLoading(true);
@@ -903,39 +985,113 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
       axios.get(`http://localhost:8000/api/debit-note?vendor_id=${vendorId}`).catch(() => ({ data: { data: [] } })),
       axios.get(`http://localhost:8000/api/payment-out?vendor_id=${vendorId}`).catch(() => ({ data: { data: [] } })),
     ]).then(([purchaseRes, returnRes, debitRes, paymentRes]) => {
-      const purchases = (purchaseRes.data.data || []).map(r => ({ _id: r._id, date: r.invoice_date,       voucher: "Purchase Invoice", number: r.supplier_invoice_no || "—", credit: r.total_amount || 0, debit: 0 }));
-      const returns   = (returnRes.data.data   || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Purchase Return",  number: r.return_no || "—",              credit: 0, debit: r.total_amount || 0 }));
-      const debits    = (debitRes.data.data    || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Debit Note",        number: r.debit_note_no || r.return_no || "—", credit: 0, debit: r.amount || r.total_amount || 0 }));
-      const payments  = (paymentRes.data.data  || []).map(r => ({ _id: r._id, date: r.date || r.createdAt, voucher: "Payment Out",       number: r.payment_no || "—",             credit: 0, debit: r.amount || 0 }));
+const purchases = (purchaseRes.data.data || []).map(r => ({
+  _id: r._id,
+  date: r.invoice_date,
+  voucher: "Purchase Invoice",
+  number: r.supplier_invoice_no || "—",
+  credit: r.total_amount || 0,
+  debit: 0,
+}));
 
-      const all = [...purchases, ...returns, ...debits, ...payments].sort((a, b) => new Date(a.date) - new Date(b.date));
-      let balance = vendor.opening_balance || 0;
-      const withBalance = all.map(row => { balance = balance + row.credit - row.debit; return { ...row, runningBalance: balance }; });
+const openingBalance = Number(vendor.opening_balance || 0);
+
+const returns = (returnRes.data.data || []).map(r => ({
+  _id: r._id,
+  date: r.date || r.createdAt,
+  voucher: "Purchase Return",
+  number: r.return_no || "—",
+  credit: 0,
+  debit: r.total_amount || 0,
+}));
+
+const debits = (debitRes.data.data || []).map(r => ({
+  _id: r._id,
+  date: r.date || r.createdAt,
+  voucher: "Debit Note",
+  number: r.debit_note_no || r.return_no || "—",
+  credit: 0,
+  debit: r.amount || r.total_amount || 0,
+}));
+
+const payments = (paymentRes.data.data || []).map(r => ({
+  _id: r._id,
+  date: r.date || r.createdAt,
+  voucher: "Payment Out",
+  number: r.payment_no || "—",
+  credit: 0,
+  debit: r.amount || 0,
+}));
+
+const openingEntry =
+  openingBalance > 0
+    ? [
+        {
+          _id: "opening-balance",
+          date: vendor.createdAt || new Date(),
+          voucher: "Opening Balance",
+          number: "OPENING",
+          credit: openingBalance,
+          debit: 0,
+          isOpening: true,
+        },
+      ]
+    : [];
+
+const all = [
+  ...openingEntry,
+  ...purchases,
+  ...returns,
+  ...debits,
+  ...payments,
+].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+let runningBal = 0;
+
+const withBalance = all.map((row) => {
+
+  runningBal =
+    runningBal +
+    Number(row.credit || 0) -
+    Number(row.debit || 0);
+
+  return {
+    ...row,
+    runningBalance: runningBal,
+  };
+});
+
+const balance = runningBal;
 
       const dates   = all.map(r => new Date(r.date)).filter(d => !isNaN(d));
       const minDate = dates.length ? new Date(Math.min(...dates)) : null;
       const maxDate = dates.length ? new Date(Math.max(...dates)) : null;
       const fmtD    = d => d?.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) || "";
-      setSummary({ totalPayable: balance, dateRange: minDate && maxDate ? `${fmtD(minDate)} – ${fmtD(maxDate)}` : "—" });
+setSummary({
+
+  totalPurchase: all.reduce(
+    (s, r) => s + Number(r.credit || 0),
+    0
+  ),
+
+  totalPaid: payments.reduce(
+    (s, r) => s + Number(r.debit || 0),
+    0
+  ),
+
+  totalPayable: balance,
+
+  dateRange:
+    minDate && maxDate
+      ? `${fmtD(minDate)} – ${fmtD(maxDate)}`
+      : "—",
+
+});
       setEntries(withBalance);
     }).finally(() => setLoading(false));
   }, [vendorId]);
 
-  const VOUCHER_COLORS = {
-    "Purchase Invoice": "text-blue-700 bg-blue-50",
-    "Purchase Return":  "text-orange-700 bg-orange-50",
-    "Debit Note":       "text-red-700 bg-red-50",
-    "Payment Out":      "text-green-700 bg-green-50",
-  };
 
-  const cols = [
-    { key: "date",           label: "Date",        render: r => fmtDate(r.date) },
-    { key: "voucher",        label: "Voucher",      render: r => <span className={`px-2 py-0.5 rounded text-xs font-medium ${VOUCHER_COLORS[r.voucher] || "text-gray-600 bg-gray-100"}`}>{r.voucher}</span> },
-    { key: "number",         label: "Ref No" },
-    { key: "credit",         label: "Credit (₹)",  render: r => r.credit > 0 ? <span className="text-gray-800 font-medium tabular-nums">{fmt(r.credit)}</span>  : <span className="text-gray-300">—</span> },
-    { key: "debit",          label: "Debit (₹)",   render: r => r.debit  > 0 ? <span className="text-green-700 font-medium tabular-nums">{fmt(r.debit)}</span>   : <span className="text-gray-300">—</span> },
-    { key: "runningBalance", label: "Balance (₹)", render: r => <span className={`font-semibold tabular-nums ${r.runningBalance < 0 ? "text-red-600" : r.runningBalance > 0 ? "text-gray-800" : "text-gray-400"}`}>{r.runningBalance < 0 ? `(${fmt(Math.abs(r.runningBalance))})` : fmt(r.runningBalance)}</span> },
-  ];
 
   const getLedgerExportData = () => entries.map(r => ({
     date:    fmtDate(r.date),
@@ -985,32 +1141,197 @@ function LedgerTab({ vendor, vendorId, showFilter, setShowFilter, selectedFilter
         </button>
       </div>
       <div className="border border-gray-200 rounded-xl overflow-visible">
-        <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-start">
-          <div><p className="text-[17px] font-bold text-gray-900">D&apos;Lume</p><p className="text-[12px] text-indigo-500 mt-0.5">Phone no: &nbsp;9137826646</p></div>
-          <p className="text-[11.5px] font-semibold text-gray-500 uppercase tracking-wide">Party Ledger</p>
-        </div>
-        <div className="px-5 pt-4 pb-4 flex justify-between items-start">
-          <div>
-            <p className="text-[12px] text-gray-500">To,</p>
-            <p className="text-[14px] font-bold text-gray-900 mt-0.5">{vendor.vendor_name}</p>
-            <p className="text-[12px] text-gray-500 mt-0.5">{vendor.contact_no_1}</p>
-          </div>
-          <div className="border border-gray-200 rounded-lg px-4 py-3 text-right min-w-[220px]">
-            <p className="text-[12px] text-gray-500 pb-2 mb-2 border-b border-gray-200">{summary.dateRange}</p>
-            <p className="text-[12px] text-gray-500">Total Payable</p>
-            <p className={`text-[16px] font-bold mt-0.5 ${summary.totalPayable < 0 ? "text-red-600" : "text-gray-900"}`}>{fmt(Math.abs(summary.totalPayable))}</p>
-          </div>
-        </div>
-        <div className="mx-0 border-t border-gray-100">
-          <table className="w-full text-[13px]"><tbody>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              <td className="px-4 py-3 text-gray-400 italic" colSpan={3}>Opening Balance</td>
-              <td className="px-4 py-3 text-gray-300">—</td><td className="px-4 py-3 text-gray-300">—</td>
-              <td className="px-4 py-3 font-semibold text-gray-700 tabular-nums">{fmt(vendor.opening_balance || 0)}</td>
-            </tr>
-          </tbody></table>
-        </div>
-        {loading ? <p className="text-sm text-gray-400 py-10 text-center">Loading ledger...</p> : <TableView cols={cols} rows={entries} />}
+     <div className="px-7 py-5 border-b border-gray-200 bg-gray-50">
+
+  <div className="flex items-start justify-between">
+
+    <div>
+
+      <h1 className="text-[22px] font-semibold text-gray-900">
+        D&apos;Lume
+      </h1>
+
+      <p className="text-[12px] text-gray-500 mt-1">
+        Vendor Detailed Ledger Report
+      </p>
+
+      <div className="flex items-center gap-5 mt-2 text-[11px] text-gray-500">
+
+        <span>
+          Vendor:
+          {" "}
+          <span className="font-medium text-gray-700">
+            {vendorName}
+          </span>
+        </span>
+
+        <span>
+          Generated:
+          {" "}
+          {new Date().toLocaleDateString("en-GB")}
+        </span>
+
+      </div>
+
+    </div>
+
+    <div className="text-right">
+
+      <p className="text-[11px] uppercase tracking-wide text-gray-400">
+        Outstanding Balance
+      </p>
+
+      <p className="text-[24px] font-semibold text-red-600 mt-1 tabular-nums">
+        {fmt(Math.abs(summary.totalPayable))}
+      </p>
+
+    </div>
+
+  </div>
+
+</div>
+
+<div className="grid grid-cols-3 border-b border-gray-200">
+
+  <div className="px-6 py-4 border-r border-gray-200">
+
+    <p className="text-[11px] uppercase tracking-wide text-gray-400">
+      Total Purchase
+    </p>
+
+    <p className="text-[18px] font-semibold text-gray-900 mt-1 tabular-nums">
+      {fmt(summary.totalPurchase)}
+    </p>
+
+  </div>
+
+  <div className="px-6 py-4 border-r border-gray-200">
+
+    <p className="text-[11px] uppercase tracking-wide text-gray-400">
+      Total Paid
+    </p>
+
+    <p className="text-[18px] font-semibold text-green-700 mt-1 tabular-nums">
+      {fmt(summary.totalPaid)}
+    </p>
+
+  </div>
+
+  <div className="px-6 py-4">
+
+    <p className="text-[11px] uppercase tracking-wide text-gray-400">
+      Current Balance
+    </p>
+
+    <p className="text-[18px] font-semibold text-red-600 mt-1 tabular-nums">
+      {fmt(Math.abs(summary.totalPayable))}
+    </p>
+
+  </div>
+
+</div>
+    
+     
+       {loading ? (
+  <p className="text-sm text-gray-400 py-10 text-center">
+    Loading ledger...
+  </p>
+) : (
+
+  <TableView
+    cols={[
+      {
+        key: "date",
+        label: "Date",
+        render: (r) => (
+          <span className="whitespace-nowrap">
+            {fmtDate(r.date)}
+          </span>
+        ),
+      },
+
+      {
+        key: "voucher",
+        label: "Voucher",
+        render: (r) => (
+          <span
+            className={`inline-block px-2.5 py-[3px] text-[12px] font-medium rounded-full border
+            ${
+              r.voucher === "Opening Balance"
+                ? "bg-orange-100 text-orange-700 border-orange-300"
+
+                : r.voucher === "Purchase Invoice"
+                ? "bg-blue-100 text-blue-700 border-blue-200"
+
+                : r.voucher === "Payment Out"
+                ? "bg-green-100 text-green-700 border-green-200"
+
+                : r.voucher === "Purchase Return"
+                ? "bg-yellow-100 text-yellow-700 border-yellow-200"
+
+                : "bg-red-100 text-red-700 border-red-200"
+            }`}
+          >
+            {r.voucher}
+          </span>
+        ),
+      },
+
+      {
+        key: "number",
+        label: "Ref No",
+        render: (r) => (
+          <span className="font-medium text-gray-700">
+            {r.number}
+          </span>
+        ),
+      },
+
+      {
+        key: "credit",
+        label: "Credit",
+        render: (r) => (
+          <span className="font-medium text-gray-800 tabular-nums">
+            {r.credit > 0 ? fmt(r.credit) : "—"}
+          </span>
+        ),
+      },
+
+      {
+        key: "debit",
+        label: "Debit",
+        render: (r) => (
+          <span className="font-medium text-green-700 tabular-nums">
+            {r.debit > 0 ? fmt(r.debit) : "—"}
+          </span>
+        ),
+      },
+
+      {
+        key: "balance",
+        label: "Balance",
+        render: (r) => (
+          <span
+            className={`font-bold tabular-nums
+            ${
+              r.runningBalance > 0
+                ? "text-red-600"
+                : "text-gray-800"
+            }`}
+          >
+            {fmt(Math.abs(r.runningBalance))}
+          </span>
+        ),
+      },
+    ]}
+
+    rows={entries.map((r) => ({
+      ...r,
+      rowClassName: r.isOpening ? "bg-orange-50" : "",
+    }))}
+  />
+
+)}
       </div>
     </>
   );

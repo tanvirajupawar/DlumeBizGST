@@ -94,15 +94,21 @@ const fetchInvoice = async () => {
           p.paid_amount ??
           initialInvoice.paid_amount,
 
-        items: (p.details || []).map((it) => ({
+   items: (p.details || []).map((it) => ({
 
-          item:
-            it.product_name ||
-            it.item ||
-            "",
+  item:
+    it.product_name ||
+    it.item ||
+    "",
 
-          qty:
-            Number(it.qty || 0),
+  bags:
+    Number(it.bags || 1),
+
+  units:
+    Number(it.units || 1),
+
+  qty:
+    Number(it.qty || 0),
 
           price:
             Number(it.price || 0),
@@ -622,13 +628,7 @@ return () => {
             <p className="text-xs font-mono text-gray-400 mt-0.5">{invoice.invoiceNo || "—"}</p>
           </div>
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={refreshAll}
-              className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition"
-              title="Refresh"
-            >
-              <FiRefreshCw size={13} />
-            </button>
+          
             <button
               onClick={handleClose}
               className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition mt-0.5"
@@ -678,22 +678,13 @@ return () => {
         )}
 
         {/* ── Tabs ── */}
-        <div className="flex border-b border-gray-100 px-6 mt-3">
-          {["items", "returns"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`mr-5 pb-2.5 text-xs font-semibold uppercase tracking-widest transition border-b-2
-                ${activeTab === tab
-                  ? "border-[#1e3a8a] text-[#1e3a8a]"
-                  : "border-transparent text-gray-400 hover:text-gray-600"}`}
-            >
-              {tab === "items"
-                ? "Line Items"
-                : `Credits${combinedCount > 0 ? ` (${combinedCount})` : ""}`}
-            </button>
-          ))}
-        </div>
+    <div className="flex border-b border-gray-100 px-6 mt-3">
+  <button
+    className="pb-2.5 text-xs font-semibold uppercase tracking-widest border-b-2 border-[#1e3a8a] text-[#1e3a8a]"
+  >
+    Line Items
+  </button>
+</div>
 
         {/* ── Tab content ── */}
         <div className="flex-1 overflow-y-auto">
@@ -706,21 +697,72 @@ return () => {
               ) : (
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-y border-gray-100 bg-gray-50">
-                      <th className="text-left px-6 py-2.5 text-xs font-medium text-gray-500 w-full">Item</th>
-                      <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">Qty</th>
-                      <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">Unit Price</th>
-                      <th className="text-right px-6 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">Total</th>
-                    </tr>
+                <tr className="border-y border-gray-100 bg-gray-50">
+  <th className="text-left px-6 py-2.5 text-xs font-medium text-gray-500 w-full">
+    Item
+  </th>
+
+  <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">
+    Bags
+  </th>
+
+  <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">
+    Unit
+  </th>
+
+  <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">
+    Total Qty
+  </th>
+
+  <th className="text-right px-4 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">
+    Unit Price
+  </th>
+
+  <th className="text-right px-6 py-2.5 text-xs font-medium text-gray-500 whitespace-nowrap">
+    Total
+  </th>
+</tr>
                   </thead>
                   <tbody>
                     {invoice.items.map((row, i) => (
-                      <tr key={i} className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${i === invoice.items.length - 1 ? "border-b-0" : ""}`}>
-                        <td className="px-6 py-3 text-xs font-medium text-gray-800">{row.item}</td>
-                        <td className="px-4 py-3 text-xs text-gray-500 text-right tabular-nums">{row.qty}</td>
-                        <td className="px-4 py-3 text-xs text-gray-500 text-right tabular-nums">{fmtRupee(row.price)}</td>
-                        <td className="px-6 py-3 text-xs font-semibold text-gray-800 text-right tabular-nums">{fmtRupee(row.total)}</td>
-                      </tr>
+                   <tr
+  key={i}
+  className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${
+    i === invoice.items.length - 1 ? "border-b-0" : ""
+  }`}
+>
+
+  {/* ITEM */}
+  <td className="px-6 py-3 text-xs font-medium text-gray-800">
+    {row.item}
+  </td>
+
+  {/* BAGS */}
+  <td className="px-3 py-3 text-xs text-gray-500 text-right tabular-nums">
+    {row.bags || 1}
+  </td>
+
+  {/* UNIT */}
+  <td className="px-3 py-3 text-xs text-gray-500 text-right tabular-nums">
+    {row.units || 1}
+  </td>
+
+  {/* TOTAL QTY */}
+  <td className="px-3 py-3 text-xs font-semibold text-gray-700 text-right tabular-nums">
+    {row.qty}
+  </td>
+
+  {/* PRICE */}
+  <td className="px-4 py-3 text-xs text-gray-500 text-right tabular-nums">
+    {fmtRupee(row.price)}
+  </td>
+
+  {/* TOTAL */}
+  <td className="px-6 py-3 text-xs font-semibold text-gray-800 text-right tabular-nums">
+    {fmtRupee(row.total)}
+  </td>
+
+</tr>
                     ))}
                   </tbody>
                 </table>

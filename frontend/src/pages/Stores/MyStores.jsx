@@ -343,9 +343,10 @@ const [store, setStore] = useState({});
 
   const [editingStore, setEditingStore] = useState(false);
 
-  useEffect(() => {
+useEffect(() => {
 
   fetchCompany();
+  fetchStaffs();
 
 }, []);
 
@@ -353,7 +354,7 @@ const fetchCompany = async () => {
   try {
 
     const res = await axios.get(
-      "http://localhost:5000/api/company"
+      "http://localhost:8000/api/company"
     );
 if (res.data.data && res.data.data.length > 0) {
 
@@ -396,11 +397,49 @@ if (res.data.data && res.data.data.length > 0) {
 };
 
 
-  const [users, setUsers] = useState([
-    { id: 1, name: "Vinod Sarode",  role: "Manager",  phone: "",           email: "vs10301020@dlume.com", active: true },
-    { id: 2, name: "Sale Manager",  role: "Operator", phone: "",           email: "falak@sales.com",      active: true },
-    { id: 3, name: "Tanvi Pawar",   role: "Manager",  phone: "8169708224", email: "",                     active: true },
-  ]);
+const fetchStaffs = async () => {
+
+  try {
+
+    const res = await axios.get(
+      "http://localhost:8000/api/staffs"
+    );
+
+    const staffs = res.data.data || [];
+
+    setUsers(
+      staffs.map((s) => ({
+        id: s._id,
+
+        name:
+          `${s.first_name || ""} ${s.last_name || ""}`.trim(),
+
+        role:
+          s.designation || "Operator",
+
+        phone:
+          s.contact_no_1 || "",
+
+        email:
+          s.email || "",
+
+        active:
+          s.active !== false,
+      }))
+    );
+
+  } catch (err) {
+
+    console.error(
+      "Fetch Staff Error:",
+      err
+    );
+
+  }
+};
+
+
+const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [showUserModal, setShowUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -429,7 +468,7 @@ const saveStore = async (updated) => {
     if (updated._id) {
 
       companyResponse = await axios.post(
-        `http://localhost:5000/api/company/${updated._id}`,
+        `http://localhost:8000/api/company/${updated._id}`,
         payload
       );
 
@@ -437,7 +476,7 @@ const saveStore = async (updated) => {
 
       // CREATE COMPANY
       companyResponse = await axios.post(
-        "http://localhost:5000/api/company",
+        "http://localhost:8000/api/company",
         payload
       );
 
@@ -454,7 +493,7 @@ const saveStore = async (updated) => {
     if (companyId) {
 
       await axios.put(
-        `http://localhost:5000/api/staffs/company/${companyId}`,
+        `http://localhost:8000/api/staffs/company/${companyId}`,
         {
           company_name: updated.business_name,
           company_gstin: updated.gstin,
@@ -516,47 +555,133 @@ const saveStore = async (updated) => {
 
   const openNew = () => { setEditingUser(null); setUserForm({ name: "", role: "Operator", phone: "", email: "", active: true }); setShowUserModal(true); };
   const openEdit = (u) => { setEditingUser(u); setUserForm({ name: u.name, role: u.role, phone: u.phone, email: u.email, active: u.active }); setShowUserModal(true); };
-  const saveUser = () => {
+const saveUser = async () => {
+
+  try {
+
     if (!userForm.name.trim()) return;
-    setUsers(prev => editingUser
-      ? prev.map(u => u.id === editingUser.id ? { ...u, ...userForm } : u)
-      : [...prev, { id: Date.now(), ...userForm }]
-    );
+
+    const parts =
+      userForm.name.trim().split(" ");
+
+    const first_name =
+      parts[0] || "";
+
+    const last_name =
+      parts.slice(1).join(" ") || "-";
+
+    const payload = {
+
+      company_id: store._id,
+
+      first_name,
+      last_name,
+
+      designation:
+        userForm.role,
+
+      contact_no_1:
+        userForm.phone,
+
+      email:
+        userForm.email,
+
+      active:
+        userForm.active,
+    };
+
+    // UPDATE
+    if (editingUser?.id) {
+
+      await axios.put(
+        `http://localhost:8000/api/staffs/${editingUser.id}`,
+        payload
+      );
+
+    } else {
+
+      // CREATE
+      await axios.post(
+        "http://localhost:8000/api/staffs",
+        payload
+      );
+    }
+
+    // REFRESH LIST
+    await fetchStaffs();
+
     setShowUserModal(false);
 
     setAlert({
-  show: true,
-  message: editingUser
-    ? "User updated successfully"
-    : "User added successfully",
-  type: "success",
-});
+      show: true,
+      message: editingUser
+        ? "User updated successfully"
+        : "User added successfully",
+      type: "success",
+    });
 
-setTimeout(() => {
-  setAlert({ show: false, message: "", type: "success" });
-}, 3000);
+    setTimeout(() => {
+      setAlert({
+        show: false,
+        message: "",
+        type: "success",
+      });
+    }, 3000);
 
-  };
+  } catch (err) {
+
+    console.error(
+      "SAVE USER ERROR:",
+      err.response?.data || err
+    );
+
+    setAlert({
+      show: true,
+      message: "Failed to save user",
+      type: "error",
+    });
+  }
+};
 const [deleteId, setDeleteId] = useState(null);
 
 const deleteUser = (id) => {
   setDeleteId(id);
 };
 
-const confirmDelete = () => {
-  setUsers(prev => prev.filter(u => u.id !== deleteId));
-  setDeleteId(null);
+const confirmDelete = async () => {
 
-  setAlert({
-  show: true,
-  message: "User deleted successfully",
-  type: "error",
-});
+  try {
 
-setTimeout(() => {
-  setAlert({ show: false, message: "", type: "success" });
-}, 3000);
+    await axios.delete(
+      `http://localhost:8000/api/staffs/${deleteId}`
+    );
 
+    await fetchStaffs();
+
+    setDeleteId(null);
+
+    setAlert({
+      show: true,
+      message: "User deleted successfully",
+      type: "success",
+    });
+
+    setTimeout(() => {
+      setAlert({
+        show: false,
+        message: "",
+        type: "success",
+      });
+    }, 3000);
+
+  } catch (err) {
+
+    console.error(
+      "DELETE USER ERROR:",
+      err.response?.data || err
+    );
+
+  }
 };
 
 const [alert, setAlert] = useState({

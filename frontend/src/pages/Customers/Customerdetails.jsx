@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import InvoiceDetailPanel from "../../components/InvoiceDetailPanel";
 import SalesReturnModal from "../../components/SalesReturnModal";
@@ -30,7 +30,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
   const now     = new Date();
   const dateStr = now.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 
-  // ── helpers ──
   const txt = (text, x, y, opts = {}) => doc.text(String(text ?? ""), x, y, opts);
   const line = (x1, y1, x2, y2) => {
     doc.setDrawColor(180, 180, 180);
@@ -38,9 +37,7 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
     doc.line(x1, y1, x2, y2);
   };
 
-  // ── Page header (runs on page 1 only via manual call) ──
   const drawPageHeader = () => {
-    // Company — left
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.setTextColor(20, 20, 20);
@@ -51,7 +48,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
     doc.setTextColor(100, 100, 100);
     txt("Ph: 9137826646", margin, 19);
 
-    // Report title — right
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(30, 30, 30);
@@ -68,7 +64,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
   drawPageHeader();
   let y = 28;
 
-  // ── Customer block ──
   if (customer) {
     const name    = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim() || "—";
     const phone   = customer.contact_no_1 || customer.phone || "—";
@@ -80,7 +75,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
     const openBal = "Rs. " + Number(customer.opening_balance || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 });
     const partyType = customer.party_type || "Customer";
 
-    // "To" block — left side
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5);
     doc.setTextColor(120, 120, 120);
@@ -93,7 +87,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
     txt(name, margin, y);
     y += 5;
 
-    // Detail rows — two columns
     const fields = [
       ["Mobile",          phone,    "GSTIN",            gstin   ],
       ["Email",           email.length > 35 ? email.substring(0,33)+"…" : email,
@@ -128,7 +121,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
     y += 5;
   }
 
-  // ── Table ──
   autoTable(doc, {
     startY: y,
     head: [columns.map(c => c.label)],
@@ -158,12 +150,8 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
       lineColor: [170, 170, 170],
       lineWidth: 0.3,
     },
-    alternateRowStyles: {
-      fillColor: [250, 250, 250],
-    },
-    bodyStyles: {
-      fillColor: [255, 255, 255],
-    },
+    alternateRowStyles: { fillColor: [250, 250, 250] },
+    bodyStyles: { fillColor: [255, 255, 255] },
     columnStyles: {
       ...(columns.length > 2 && {
         [columns.length - 1]: { halign: "right" },
@@ -172,7 +160,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
       }),
     },
     didDrawPage: (hookData) => {
-      // Footer on every page
       const pageCount = doc.internal.getNumberOfPages();
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7);
@@ -183,7 +170,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
     },
   });
 
-  // ── Totals summary ──
   const lastY = doc.lastAutoTable.finalY;
   const amountCols = columns.filter(c =>
     ["amount", "balance", "debit", "credit"].some(k => c.key.toLowerCase().includes(k))
@@ -191,7 +177,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
 
   if (amountCols.length > 0 && data.length > 0) {
     const summaryY = lastY + 4;
-
     line(margin, summaryY, pageW - margin, summaryY);
 
     doc.setFont("helvetica", "normal");
@@ -199,7 +184,6 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
     doc.setTextColor(100, 100, 100);
     txt(`${data.length} record${data.length !== 1 ? "s" : ""}`, margin, summaryY + 5);
 
-    // Print totals right-to-left
     let rightOffset = pageW - margin;
     [...amountCols].reverse().forEach(col => {
       const total = data.reduce((sum, row) => sum + Number(row[col.key] || 0), 0);
@@ -226,20 +210,15 @@ const generatePDFFile = async (data, columns, title, customer = null) => {
 // ── Excel Generator ───────────────────────────────────────────────────────────
 const generateExcelFile = async (data, columns, title, customer = null) => {
   const XLSX = await import("xlsx");
-
   const wb = XLSX.utils.book_new();
-
-  // Build rows array
   const rows = [];
 
-  // Company header rows
   rows.push(["D'Lume"]);
   rows.push(["Ph: 9137826646"]);
   rows.push([`Report: ${title}`]);
   rows.push([`Generated: ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}`]);
-  rows.push([]); // blank
+  rows.push([]);
 
-  // Customer details block
   if (customer) {
     const name    = customer.customer_name || `${customer.first_name || ""} ${customer.last_name || ""}`.trim() || "—";
     const phone   = customer.contact_no_1 || customer.phone || "—";
@@ -260,18 +239,15 @@ const generateExcelFile = async (data, columns, title, customer = null) => {
     rows.push(["Opening Balance",  openBal]);
     rows.push(["Billing Address",  addr]);
     rows.push(["Shipping Address", ship]);
-    rows.push([]); // blank
+    rows.push([]);
   }
 
-  // Table header
   rows.push(columns.map(c => c.label));
 
-  // Table data
   data.forEach(row => {
     rows.push(columns.map(c => {
       const val = row[c.key];
       if (val === null || val === undefined) return "";
-      // Keep numbers as numbers for Excel
       if (typeof val === "number") return val;
       const num = Number(val);
       if (!isNaN(num) && val !== "" && val !== "—" && val !== "-") return num;
@@ -279,12 +255,11 @@ const generateExcelFile = async (data, columns, title, customer = null) => {
     }));
   });
 
-  // Totals row
   const amountCols = columns.filter(c =>
     ["amount", "balance", "debit", "credit"].some(k => c.key.toLowerCase().includes(k))
   );
   if (amountCols.length > 0 && data.length > 0) {
-    rows.push([]); // blank before totals
+    rows.push([]);
     const totalsRow = columns.map(col => {
       if (amountCols.some(ac => ac.key === col.key)) {
         return data.reduce((sum, row) => sum + Number(row[col.key] || 0), 0);
@@ -295,8 +270,6 @@ const generateExcelFile = async (data, columns, title, customer = null) => {
   }
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  // Set column widths
   ws["!cols"] = columns.map(c => {
     if (["address", "addr", "email"].some(k => c.key.toLowerCase().includes(k))) return { wch: 38 };
     if (["amount", "balance", "debit", "credit"].some(k => c.key.toLowerCase().includes(k))) return { wch: 16 };
@@ -304,13 +277,11 @@ const generateExcelFile = async (data, columns, title, customer = null) => {
   });
 
   XLSX.utils.book_append_sheet(wb, ws, title.substring(0, 31));
-
   const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   const blob  = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   return new File([blob], `${title}.xlsx`, { type: blob.type });
 };
 
-// ── download helpers ──────────────────────────────────────────────────────────
 const triggerDownload = (file) => {
   const url = URL.createObjectURL(file);
   const a   = document.createElement("a");
@@ -446,9 +417,17 @@ const openPrintWindow = (title, tableHTML) => {
 };
 
 // ── Receive Modal ─────────────────────────────────────────────────────────────
-function ReceiveModal({ invoices, customerId, onClose, onSuccess }) {
-  const totalDue  = invoices.reduce((s, r) => s + getBalance(r), 0);
-  const [amount, setAmount] = useState(totalDue);
+function ReceiveModal({
+  invoices,
+  customerId,
+  customer,
+  onClose,
+  onSuccess
+}) {
+const totalDue =
+  Number(customer?.opening_balance || 0) +
+  invoices.reduce((s, r) => s + getBalance(r), 0);
+    const [amount, setAmount] = useState(totalDue);
   const [mode, setMode]     = useState("Cash");
   const [remark, setRemark] = useState("");
   const [saving, setSaving] = useState(false);
@@ -538,8 +517,38 @@ function TransactionsTab({ customerId, customerName, customer, showFilter, setSh
     if (!customerId) return;
     try {
       const res = await axios.get(`http://localhost:8000/api/sales?customer_id=${customerId}`);
-      if (res.data.success) setInvoices(res.data.data);
-    } catch (err) { console.error(err); }
+if (res.data.success) {
+
+  let invoiceData = res.data.data || [];
+
+  // 🔥 ADD OPENING BALANCE ROW
+  if (Number(customer?.opening_balance || 0) > 0) {
+
+    invoiceData = [
+      {
+        _id: "opening-balance",
+
+        invoice_no: "OPENING BALANCE",
+
+        invoice_date:
+          customer.createdAt || new Date(),
+
+        total_amount:
+          Number(customer.opening_balance),
+
+        paid_amount: 0,
+
+        payment_status: "Unpaid",
+
+        isOpeningBalance: true,
+      },
+
+      ...invoiceData,
+    ];
+  }
+
+  setInvoices(invoiceData);
+}    } catch (err) { console.error(err); }
   };
 
   useEffect(() => { setLoading(true); fetchInvoices().finally(() => setLoading(false)); }, [customerId]);
@@ -629,12 +638,32 @@ function TransactionsTab({ customerId, customerName, customer, showFilter, setSh
         </>
       ),
     },
+
+
     {
+      
       key: "payment_status", label: "Status",
-      render: r => {
-        const bal = getBalance(r); const total = Number(r.total_amount || 0);
-        const status = bal === 0 ? "Paid" : bal < total ? "Partial" : "Unpaid";
-        return (
+   render: r => {
+
+  if (r.isOpeningBalance) {
+
+    return (
+      <span className="inline-block px-2.5 py-[3px] text-[12px] font-medium rounded-full border bg-orange-100 text-orange-700 border-orange-300">
+        Opening
+      </span>
+    );
+  }
+
+  const bal = getBalance(r);
+const total = Number(r.total_amount || 0);
+
+const status =
+  bal === 0
+    ? "Paid"
+    : bal < total
+    ? "Partial"
+    : "Unpaid";
+            return (
           <span className={`inline-block px-2.5 py-[3px] text-[12px] font-medium rounded-full border
             ${status === "Paid" ? "bg-green-100 text-green-800 border-green-300"
               : status === "Unpaid" ? "bg-red-100 text-red-700 border-red-200"
@@ -644,7 +673,6 @@ function TransactionsTab({ customerId, customerName, customer, showFilter, setSh
         );
       },
     },
-  
   ];
 
   if (showSuccess) {
@@ -675,8 +703,11 @@ function TransactionsTab({ customerId, customerName, customer, showFilter, setSh
 
       {loading
         ? <p className="text-sm text-gray-400 py-8 text-center">Loading...</p>
-        : <TableView cols={cols} rows={invoices} onRowClick={(row) => {
-            setSelectedInvoice({
+        : <TableView cols={cols} rows={invoices}onRowClick={(row) => {
+
+  if (row.isOpeningBalance) return;
+
+  setSelectedInvoice({
               ...row,
               invoiceNo: row.invoice_no || row.sales_invoice_no,
               amount:    row.total_amount,
@@ -690,8 +721,10 @@ function TransactionsTab({ customerId, customerName, customer, showFilter, setSh
       {selectedInvoice && <InvoiceDetailPanel invoice={selectedInvoice} onClose={() => setSelectedInvoice(null)} />}
 
       {showReceiveModal && (
-        <ReceiveModal
-          invoices={selectedInvoices} customerId={customerId}
+       <ReceiveModal
+  invoices={selectedInvoices}
+  customerId={customerId}
+  customer={customer}
           onClose={() => setShowReceiveModal(false)}
           onSuccess={(data) => {
             setShowReceiveModal(false);
@@ -889,8 +922,569 @@ function ProfileTab({ customer, onEdit }) {
   );
 }
 
-// ── Tab: Ledger ───────────────────────────────────────────────────────────────
-function LedgerTab({ customer, customerId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
+function DetailedLedgerTab({
+  customer,
+  customerId,
+  showFilter,
+  setShowFilter,
+  selectedFilter,
+  setSelectedFilter,
+  hoveredFilter,
+  setHoveredFilter,
+  filterRef,
+}) {
+
+  const [invoices, setInvoices] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const customerName =
+    customer.customer_name ||
+    `${customer.first_name || ""} ${customer.last_name || ""}`.trim();
+
+  // ───────────────── FETCH ─────────────────
+  const fetchAll = () => {
+
+    if (!customerId) return Promise.resolve();
+
+    return Promise.all([
+
+      axios
+        .get(`http://localhost:8000/api/sales?customer_id=${customerId}`)
+        .catch(() => ({ data: { data: [] } })),
+
+      axios
+        .get(`http://localhost:8000/api/payment-in?customer_id=${customerId}`)
+        .catch(() => ({ data: { data: [] } })),
+
+    ]).then(([salesRes, paymentRes]) => {
+
+      setInvoices(salesRes.data.data || []);
+      setPayments(paymentRes.data.data || []);
+
+    });
+  };
+
+  useEffect(() => {
+
+    setLoading(true);
+
+    fetchAll().finally(() => setLoading(false));
+
+  }, [customerId]);
+
+  useEffect(() => {
+
+    const handle = () => {
+
+      setLoading(true);
+
+      fetchAll().finally(() => setLoading(false));
+
+    };
+
+    window.addEventListener("paymentUpdated", handle);
+
+    return () =>
+      window.removeEventListener("paymentUpdated", handle);
+
+  }, [customerId]);
+
+
+  const openingBalance =
+  Number(customer.opening_balance || 0);
+
+  // ───────────────── TIMELINE ─────────────────
+  const { timeline, totalAmount, totalPaid, totalBalance } = (() => {
+
+    const events = [];
+
+    [...invoices]
+      .sort(
+        (a, b) =>
+          new Date(a.invoice_date) -
+          new Date(b.invoice_date)
+      )
+      .forEach((inv) =>
+        events.push({
+          type: "invoice",
+          date: new Date(inv.invoice_date),
+          data: inv,
+        })
+      );
+
+    [...payments]
+      .sort(
+        (a, b) =>
+          new Date(a.date || a.createdAt) -
+          new Date(b.date || b.createdAt)
+      )
+      .forEach((pay) =>
+        events.push({
+          type: "payment",
+          date: new Date(pay.date || pay.createdAt),
+          data: pay,
+        })
+      );
+
+    events.sort((a, b) => a.date - b.date);
+
+    let runningBal = Number(customer.opening_balance || 0);
+    let totalAmt = 0;
+    let totalPaidAmt = 0;
+
+    const rows = [];
+
+    events.forEach((evt) => {
+
+      if (evt.type === "invoice") {
+
+        const inv = evt.data;
+        const invAmt = Number(inv.total_amount || 0);
+
+        runningBal += invAmt;
+        totalAmt += invAmt;
+
+        rows.push({
+          _type: "invoice",
+          inv,
+          runningBal,
+        });
+
+      } else {
+
+        const pay = evt.data;
+        const payAmt = Number(pay.amount || 0);
+
+        runningBal -= payAmt;
+        totalPaidAmt += payAmt;
+
+        rows.push({
+          _type: "payment",
+          pay,
+          payAmt,
+          runningBal,
+        });
+
+      }
+
+    });
+
+    return {
+      timeline: rows,
+      totalAmount: totalAmt,
+      totalPaid: totalPaidAmt,
+      totalBalance: runningBal,
+    };
+
+  })();
+
+  // ───────────────── EXPORT ─────────────────
+  const handleExcel = async () =>
+    triggerDownload(
+      await generateExcelFile([], [], "Party Ledger", customer)
+    );
+
+  const handlePDF = async () =>
+    triggerDownload(
+      await generatePDFFile([], [], "Party Ledger", customer)
+    );
+
+  // ───────────────── RENDER ─────────────────
+  return (
+    <>
+
+      {/* Toolbar */}
+      <div className="flex gap-2.5 mb-4 flex-wrap">
+
+        <DateFilter
+          showFilter={showFilter}
+          setShowFilter={setShowFilter}
+          selectedFilter={selectedFilter}
+          setSelectedFilter={setSelectedFilter}
+          hoveredFilter={hoveredFilter}
+          setHoveredFilter={setHoveredFilter}
+          filterRef={filterRef}
+        />
+
+        <ActionBtn
+          icon={Ico.Download}
+          label="Excel"
+          onClick={handleExcel}
+        />
+
+        <ActionBtn
+          icon={Ico.Print}
+          label="PDF"
+          onClick={handlePDF}
+        />
+
+      </div>
+
+      {/* Main Report */}
+      <div className="bg-white border border-gray-300 rounded-xl overflow-hidden">
+
+        {/* Header */}
+        <div className="px-7 py-5 border-b border-gray-200 bg-gray-50">
+
+          <div className="flex items-start justify-between">
+
+            <div>
+
+              <h1 className="text-[22px] font-semibold text-gray-900">
+                D&apos;Lume
+              </h1>
+
+              <p className="text-[12px] text-gray-500 mt-1">
+                Customer Detailed Ledger Report
+              </p>
+
+              <div className="flex items-center gap-5 mt-2 text-[11px] text-gray-500">
+
+                <span>
+                  Customer:
+                  {" "}
+                  <span className="font-medium text-gray-700">
+                    {customerName}
+                  </span>
+                </span>
+
+                <span>
+                  Generated:
+                  {" "}
+                  {new Date().toLocaleDateString("en-GB")}
+                </span>
+
+              </div>
+
+            </div>
+
+            <div className="text-right">
+
+              <p className="text-[11px] uppercase tracking-wide text-gray-400">
+                Outstanding Balance
+              </p>
+
+          <p className="text-[24px] font-semibold text-indigo-700 mt-1 tabular-nums">
+{fmt(Math.abs(totalBalance))}</p>
+
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* Summary */}
+        <div className="grid grid-cols-3 border-b border-gray-200">
+
+          <div className="px-6 py-4 border-r border-gray-200">
+
+            <p className="text-[11px] uppercase tracking-wide text-gray-400">
+              Total Sales
+            </p>
+
+            <p className="text-[18px] font-semibold text-gray-900 mt-1 tabular-nums">
+              {fmt(totalAmount)}
+            </p>
+
+          </div>
+
+          <div className="px-6 py-4 border-r border-gray-200">
+
+            <p className="text-[11px] uppercase tracking-wide text-gray-400">
+              Total Received
+            </p>
+
+            <p className="text-[18px] font-semibold text-green-700 mt-1 tabular-nums">
+              {fmt(totalPaid)}
+            </p>
+
+          </div>
+
+          <div className="px-6 py-4">
+
+            <p className="text-[11px] uppercase tracking-wide text-gray-400">
+              Current Balance
+            </p>
+
+<p className="text-[18px] font-semibold text-indigo-700 mt-1 tabular-nums">
+  {fmt(Math.abs(totalBalance))}
+</p>
+
+          </div>
+
+        </div>
+
+        {/* Table */}
+        {loading ? (
+
+          <div className="py-16 text-center text-sm text-gray-400">
+            Loading ledger...
+          </div>
+
+        ) : (
+
+          <div className="overflow-x-auto">
+
+            <table className="w-full border-collapse">
+
+              <thead>
+
+                <tr className="bg-[#f8fafc] border-b border-gray-300">
+
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                    Date
+                  </th>
+
+                  <th className="px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                    Particulars
+                  </th>
+
+                  <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                    Bags
+                  </th>
+
+                  <th className="px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                    Qty
+                  </th>
+
+                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                    Rate
+                  </th>
+
+                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                    Debit
+                  </th>
+
+                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                    Credit
+                  </th>
+
+                  <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                    Balance
+                  </th>
+
+                </tr>
+
+              </thead>
+
+              <tbody>
+
+                {/* Opening Balance */}
+                {Number(customer.opening_balance || 0) !== 0 && (
+
+                  <tr className="bg-amber-50 border-b border-amber-100">
+
+                    <td className="px-4 py-3 text-[12px] text-gray-500">
+                      —
+                    </td>
+
+                    <td className="px-4 py-3 text-[12px] font-medium text-amber-900">
+                      Opening Balance
+                    </td>
+
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+
+                    <td className="px-4 py-3 text-right text-[12px] font-semibold text-amber-900 tabular-nums">
+                      {fmt(customer.opening_balance || 0)}
+                    </td>
+
+                  </tr>
+
+                )}
+
+                {timeline.map((row, idx) => {
+
+                  /* ───────── INVOICE ───────── */
+                  if (row._type === "invoice") {
+
+                    const inv = row.inv;
+                    const details = inv.details || [];
+
+                    return (
+
+                      <React.Fragment key={idx}>
+
+                        {/* Invoice Header */}
+                        <tr className="bg-slate-100 border-y border-slate-200">
+
+                          <td className="px-4 py-3 text-[12px] font-medium text-gray-700">
+                            {fmtDate(inv.invoice_date)}
+                          </td>
+
+                          <td
+                            colSpan={4}
+                            className="px-4 py-3 text-[12px] font-semibold text-slate-900"
+                          >
+                            Invoice #
+                            {inv.invoice_no || inv.sales_invoice_no || "—"}
+                          </td>
+
+                          <td className="px-4 py-3 text-right text-[12px] font-semibold text-slate-900 tabular-nums">
+                            {fmt(inv.total_amount || 0)}
+                          </td>
+
+                          <td></td>
+
+                          <td className="px-4 py-3 text-right text-[12px] font-semibold text-indigo-700 tabular-nums">
+                            {fmt(Math.abs(row.runningBal))}
+                          </td>
+
+                        </tr>
+
+                        {/* Item Rows */}
+                        {details.map((d, di) => {
+
+                          const qty =
+                            d.qty ||
+                            d.quantity ||
+                            0;
+
+                          const rate =
+                            Number(
+                              d.price ||
+                              d.rate ||
+                              d.sale_price ||
+                              0
+                            );
+
+                          const amount =
+                            Number(
+                              d.amount ||
+                              d.total ||
+                              qty * rate
+                            );
+
+                          return (
+
+                            <tr
+                              key={di}
+                              className="border-b border-gray-100 hover:bg-gray-50"
+                            >
+
+                              <td></td>
+
+                              <td className="px-4 py-3">
+
+                                <div className="text-[12px] text-gray-800">
+                                  {d.product_name || d.name || "—"}
+                                </div>
+
+                                {(d.description || "").trim() && (
+
+                                  <div className="text-[10px] text-gray-400 mt-0.5">
+                                    {d.description}
+                                  </div>
+
+                                )}
+
+                              </td>
+
+                              <td className="px-4 py-3 text-center text-[12px] text-gray-600">
+                                {d.bags || "-"}
+                              </td>
+
+                              <td className="px-4 py-3 text-center text-[12px] text-gray-700">
+                                {qty}
+                              </td>
+
+                              <td className="px-4 py-3 text-right text-[12px] text-gray-700 tabular-nums">
+                                {fmt(rate)}
+                              </td>
+
+                              <td className="px-4 py-3 text-right text-[12px] text-gray-900 tabular-nums">
+                                {fmt(amount)}
+                              </td>
+
+                              <td></td>
+                              <td></td>
+
+                            </tr>
+
+                          );
+
+                        })}
+
+                      </React.Fragment>
+
+                    );
+                  }
+
+                  /* ───────── PAYMENT ───────── */
+                  if (row._type === "payment") {
+
+                    const pay = row.pay;
+
+                    return (
+
+                      <tr
+                        key={idx}
+                        className="bg-green-50 border-y border-green-100"
+                      >
+
+                        <td className="px-4 py-3 text-[12px] text-green-700">
+                          {fmtDate(
+                            pay.date ||
+                            pay.payment_date ||
+                            pay.createdAt
+                          )}
+                        </td>
+
+                        <td
+                          colSpan={4}
+                          className="px-4 py-3 text-[12px] text-green-800"
+                        >
+                          Payment Received
+                          {" • "}
+                          {pay.payment_mode || "Cash"}
+
+                          {pay.transaction_id && (
+                            <span className="text-green-600">
+                              {" • "}TXN:
+                              {" "}
+                              {pay.transaction_id}
+                            </span>
+                          )}
+                        </td>
+
+                        <td></td>
+
+                        <td className="px-4 py-3 text-right text-[12px] font-semibold text-green-700 tabular-nums">
+                          {fmt(row.payAmt)}
+                        </td>
+
+                        <td className="px-4 py-3 text-right text-[12px] font-semibold text-indigo-700 tabular-nums">
+                          {fmt(Math.abs(row.runningBal))}
+                        </td>
+
+                      </tr>
+
+                    );
+                  }
+
+                  return null;
+
+                })}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        )}
+
+      </div>
+
+    </>
+  );
+}
+// ── GST Ledger (unchanged) ────────────────────────────────────────────────────
+function GSTLedgerTab({ customer, customerId, showFilter, setShowFilter, selectedFilter, setSelectedFilter, hoveredFilter, setHoveredFilter, filterRef }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState({ totalReceivable: 0, dateRange: "" });
@@ -949,12 +1543,12 @@ function LedgerTab({ customer, customerId, showFilter, setShowFilter, selectedFi
   }));
 
   const ledgerColumns = [
-    { key: "date",    label: "Date"       },
-    { key: "voucher", label: "Voucher"    },
-    { key: "ref",     label: "Ref No"     },
-    { key: "debit",   label: "Debit"      },
-    { key: "credit",  label: "Credit"     },
-    { key: "balance", label: "Balance"    },
+    { key: "date",    label: "Date"    },
+    { key: "voucher", label: "Voucher" },
+    { key: "ref",     label: "Ref No"  },
+    { key: "debit",   label: "Debit"   },
+    { key: "credit",  label: "Credit"  },
+    { key: "balance", label: "Balance" },
   ];
 
   const handleLedgerExcel = async () => {
@@ -1046,25 +1640,11 @@ function PaymentsTab({ customerId, customer, showFilter, setShowFilter, selected
   }, [customerId]);
 
   const cols = [
-    {
-  key: "sr_no",
-  label: "Sr No",
-  render: (_, index) => index + 1,
-},
-
-    { key: "date",         label: "Date",         render: r => fmtDate(r.date || r.payment_date) },
-
-    { key: "amount",       label: "Amount",        render: r => fmt(r.amount || r.total_amount) },
-{
-  key: "payment_mode",
-  label: "Payment Mode",
-  render: r =>
-    r.payment_mode ||
-    r.paymentMethod ||
-    r.method ||
-    "Cash",
-},
-    { key: "status",       label: "Status",       render: () => <span className="px-2 py-[3px] text-xs rounded-full bg-green-100 text-green-700 border border-green-300">Received</span> },
+    { key: "sr_no",       label: "Sr No",        render: (_, index) => index + 1 },
+    { key: "date",        label: "Date",         render: r => fmtDate(r.date || r.payment_date) },
+    { key: "amount",      label: "Amount",       render: r => fmt(r.amount || r.total_amount) },
+    { key: "payment_mode",label: "Payment Mode", render: r => r.payment_mode || r.paymentMethod || r.method || "Cash" },
+    { key: "status",      label: "Status",       render: () => <span className="px-2 py-[3px] text-xs rounded-full bg-green-100 text-green-700 border border-green-300">Received</span> },
   ];
 
   const getPaymentExportData = () => payments.map(r => ({
@@ -1116,7 +1696,7 @@ function PaymentsTab({ customerId, customer, showFilter, setShowFilter, selected
 }
 
 // ── Root ──────────────────────────────────────────────────────────────────────
-export default function CustomerDetails() {
+export default function CustomerDetails({ isGSTUser = false }) {
   const { id }   = useParams();
   const navigate = useNavigate();
   const [customer, setCustomer]   = useState(null);
@@ -1232,13 +1812,24 @@ export default function CustomerDetails() {
           <ProfileTab customer={customer} onEdit={() => setShowEdit(true)} />
         )}
         {activeTab === "ledger" && (
-          <LedgerTab
-            customer={customer} customerId={id}
-            showFilter={filters.ledger.show}        setShowFilter={v => updateFilter("ledger","show",v)}
-            selectedFilter={filters.ledger.selected} setSelectedFilter={v => updateFilter("ledger","selected",v)}
-            hoveredFilter={filters.ledger.hovered}   setHoveredFilter={v => updateFilter("ledger","hovered",v)}
-            filterRef={filterRef}
-          />
+          // ── Route to correct ledger based on isGSTUser ──
+          isGSTUser ? (
+            <GSTLedgerTab
+              customer={customer} customerId={id}
+              showFilter={filters.ledger.show}        setShowFilter={v => updateFilter("ledger","show",v)}
+              selectedFilter={filters.ledger.selected} setSelectedFilter={v => updateFilter("ledger","selected",v)}
+              hoveredFilter={filters.ledger.hovered}   setHoveredFilter={v => updateFilter("ledger","hovered",v)}
+              filterRef={filterRef}
+            />
+          ) : (
+            <DetailedLedgerTab
+              customer={customer} customerId={id}
+              showFilter={filters.ledger.show}        setShowFilter={v => updateFilter("ledger","show",v)}
+              selectedFilter={filters.ledger.selected} setSelectedFilter={v => updateFilter("ledger","selected",v)}
+              hoveredFilter={filters.ledger.hovered}   setHoveredFilter={v => updateFilter("ledger","hovered",v)}
+              filterRef={filterRef}
+            />
+          )
         )}
       </div>
 

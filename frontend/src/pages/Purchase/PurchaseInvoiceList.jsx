@@ -487,23 +487,63 @@ const formatted = res.data.data.map((p, index) => ({
 
                     {/* ↓ NEW — Pay button */}
                     <div className="py-4 flex items-center justify-center" onClick={e => e.stopPropagation()}>
-                      <button
-                        onClick={() => setPaymentTarget(inv)}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-[#1e3a8a] text-[11px] font-semibold text-[#1e3a8a] hover:bg-[#1e3a8a] hover:text-white transition-colors"
-                      >
-                        <FiCreditCard size={11} />
-                        Pay
-                      </button>
+             <button
+  disabled={inv.pendingAmount <= 0}
+
+  onClick={() => {
+    if (inv.pendingAmount > 0) {
+      setPaymentTarget(inv);
+    }
+  }}
+
+  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors
+
+    ${
+      inv.pendingAmount <= 0
+        ? "border border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed"
+        : "border border-[#1e3a8a] text-[#1e3a8a] hover:bg-[#1e3a8a] hover:text-white"
+    }
+  `}
+>
+  <FiCreditCard size={11} />
+
+  {inv.pendingAmount <= 0
+    ? "Paid"
+    : "Pay"}
+</button>
                     </div>
 
                     <div className="py-4 flex items-center justify-center" onClick={e => e.stopPropagation()}>
-                   <ActionMenu
-  type="purchase"   
+<ActionMenu
+  type="purchase"
   invoice={inv}
-  onEdit={() => navigate(`/purchase-invoice/${inv.id}/edit`)}
-  onPurchaseReturn={() => setPurchaseReturnTarget(inv)}
-  onDebitNote={() => setDebitNoteTarget(inv)}
-  onDelete={() => handleDelete(inv.id)}
+
+  isGST={!!inv.vendor_id?.gstin}
+
+  onEdit={
+    inv.pendingAmount <= 0
+      ? null
+      : () =>
+          navigate(
+            `/purchase-invoice/${inv.id}/edit`
+          )
+  }
+
+  disableEdit={
+    inv.pendingAmount <= 0
+  }
+
+  onPurchaseReturn={() =>
+    setPurchaseReturnTarget(inv)
+  }
+
+  onDebitNote={() =>
+    setDebitNoteTarget(inv)
+  }
+
+  onDelete={() =>
+    handleDelete(inv.id)
+  }
 />
                     </div>
                   </div>

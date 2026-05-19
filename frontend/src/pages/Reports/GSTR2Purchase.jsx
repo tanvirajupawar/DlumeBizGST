@@ -12,8 +12,11 @@ const GST_TABS = [
 ];
 
 const NON_GST_TABS = [
-  "Purchase"
+  "Purchase",
+  "Payments Out",
+  "Purchase & Payments"
 ];
+
 const FILTERS = [
   "Today", "Yesterday", "This Week", "Last Week", "Last 7 Days",
   "This Month", "Previous Month", "Last 30 Days", "This Quarter",
@@ -692,21 +695,32 @@ function PurchaseTab({ data, filter, isGSTUser }) {
 
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px", tableLayout: "fixed" }}>
-          <colgroup>
-            <col style={{ width: "9.5%" }} />
-            <col style={{ width: "10%"  }} />
-            <col style={{ width: "7%"   }} />
-            <col style={{ width: "7.5%" }} />
-            <col style={{ width: "9%"   }} />
-            <col style={{ width: "8%"   }} />
-            <col style={{ width: "8%"   }} />
-            <col style={{ width: "7%"   }} />
-            <col style={{ width: "7%"   }} />
-            <col style={{ width: "7%"   }} />
-            <col style={{ width: "7.5%" }} />
-            <col style={{ width: "5.5%" }} />
-            <col style={{ width: "7%"   }} />
-          </colgroup>
+<colgroup>
+  {isGSTUser ? (
+    <>
+      <col style={{ width: "9.5%" }} />
+      <col style={{ width: "10%" }} />
+      <col style={{ width: "7%" }} />
+      <col style={{ width: "7.5%" }} />
+      <col style={{ width: "9%" }} />
+      <col style={{ width: "8%" }} />
+      <col style={{ width: "8%" }} />
+      <col style={{ width: "7%" }} />
+      <col style={{ width: "7%" }} />
+      <col style={{ width: "7%" }} />
+      <col style={{ width: "7.5%" }} />
+      <col style={{ width: "5.5%" }} />
+      <col style={{ width: "7%" }} />
+    </>
+  ) : (
+    <>
+      <col style={{ width: "40%" }} />
+      <col style={{ width: "20%" }} />
+      <col style={{ width: "20%" }} />
+      <col style={{ width: "20%" }} />
+    </>
+  )}
+</colgroup>
           <thead>
             <tr>
               <th colSpan={2} style={TH_STYLE}></th>
@@ -733,12 +747,12 @@ function PurchaseTab({ data, filter, isGSTUser }) {
         "Tax %",
         "ITC eligible",
       ]
-    : [
-        "Vendor name",
-        "Invoice no.",
-        "Invoice date",
-        "Invoice value",
-      ]
+: [
+    "Vendor",
+    "Invoice No.",
+    "Date",
+    "Amount",
+  ]
   ).map((h) => (
     <th key={h} style={TH_STYLE}>
       {h}
@@ -748,7 +762,7 @@ function PurchaseTab({ data, filter, isGSTUser }) {
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <EmptyState colSpan={13} />
+              <EmptyState colSpan={isGSTUser ? 13 : 4} />
             ) : (
        rows.map((p, i) => {
   const t = calcTax(p);
@@ -810,21 +824,57 @@ function PurchaseTab({ data, filter, isGSTUser }) {
         </Badge>
       </td>
     </tr>
-  ) : (
-    <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-      <td style={{ ...TD_STYLE, textAlign: "left" }}>
+) : (
+    <tr
+      key={i}
+      style={{
+        background: i % 2 === 0 ? "#ffffff" : "#fcfcfc",
+        borderBottom: "1px solid #f1f5f9",
+      }}
+    >
+      <td
+        style={{
+          padding: "14px 16px",
+          fontSize: "12px",
+          fontWeight: 600,
+          color: "#111827",
+          textAlign: "left",
+        }}
+      >
         {t.vendorName}
       </td>
 
-      <td style={TD_STYLE}>
+      <td
+        style={{
+          padding: "14px 10px",
+          fontSize: "11.5px",
+          color: "#4b5563",
+          textAlign: "center",
+        }}
+      >
         {p.supplier_invoice_no || p.order_no || "—"}
       </td>
 
-      <td style={TD_STYLE}>
+      <td
+        style={{
+          padding: "14px 10px",
+          fontSize: "11.5px",
+          color: "#6b7280",
+          textAlign: "center",
+        }}
+      >
         {fmtDate(p.invoice_date)}
       </td>
 
-      <td style={{ ...TD_STYLE, textAlign: "right" }}>
+      <td
+        style={{
+          padding: "14px 16px",
+          fontSize: "12.5px",
+          fontWeight: 700,
+          color: "#111827",
+          textAlign: "right",
+        }}
+      >
         ₹ {fmt(p.total_amount)}
       </td>
     </tr>
@@ -833,23 +883,38 @@ function PurchaseTab({ data, filter, isGSTUser }) {
              
             )}
           </tbody>
-      {rows.length > 0 && isGSTUser && (
+{rows.length > 0 && !isGSTUser && (
   <tfoot>
-              <tr>
-                <td colSpan={5} style={{ ...TF_STYLE, textAlign: "left", paddingLeft: 10 }}>Totals</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.value)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.taxable)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.igst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.cgst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right" }}>₹ {fmt(totals.sgst)}</td>
-                <td style={{ ...TF_STYLE, textAlign: "right", color: "#1d4ed8" }}>₹ {fmt(totals.total)}</td>
-                <td style={TF_STYLE}>
-                  {totals.taxable ? ((totals.total / totals.taxable) * 100).toFixed(2) + "%" : "0%"}
-                </td>
-                <td style={TF_STYLE}></td>
-              </tr>
-            </tfoot>
-          )}
+    <tr style={{ background: "#f8fafc" }}>
+      <td
+        colSpan={3}
+        style={{
+          padding: "16px",
+          fontSize: "12px",
+          fontWeight: 700,
+          color: "#111827",
+          textAlign: "right",
+          borderTop: "2px solid #cbd5e1",
+        }}
+      >
+        Total Purchase Value
+      </td>
+
+      <td
+        style={{
+          padding: "16px",
+          fontSize: "13px",
+          fontWeight: 800,
+          color: "#1e293b",
+          textAlign: "right",
+          borderTop: "2px solid #cbd5e1",
+        }}
+      >
+        ₹ {fmt(totals.value)}
+      </td>
+    </tr>
+  </tfoot>
+)}
         </table>
       </div>
     </>
@@ -1034,37 +1099,64 @@ function PurchaseSummaryTab({ data, filter }) {
           <div style={{ padding: "48px 0", textAlign: "center", color: "#9ca3af", fontSize: "13px" }}>No purchase data for the selected period</div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
-            <thead>
-         <tr>
-  {(isGSTUser
-    ? [
-        "GSTIN",
-        "Vendor name",
-        "Invoice no.",
-        "Invoice date",
-        "Place of supply",
-        "Invoice value",
-        "Taxable value",
-        "IGST",
-        "CGST",
-        "SGST",
-        "Total tax",
-        "Tax %",
-        "ITC eligible",
-      ]
-    : [
-        "Vendor name",
-        "Invoice no.",
-        "Invoice date",
-        "Invoice value",
-      ]
-  ).map((h) => (
-    <th key={h} style={TH_STYLE}>
-      {h}
-    </th>
-  ))}
-</tr>
-            </thead>
+ <thead>
+  {isGSTUser ? (
+    <>
+      <tr>
+        <th colSpan={2} style={TH_STYLE}></th>
+        <th colSpan={4} style={TH_GROUP_STYLE}>
+          Invoice details from GSTR-2B
+        </th>
+        <th colSpan={1} style={TH_STYLE}></th>
+        <th colSpan={4} style={TH_GROUP_STYLE}>
+          Amount of tax
+        </th>
+        <th colSpan={1} style={TH_STYLE}></th>
+        <th colSpan={1} style={TH_STYLE}></th>
+      </tr>
+
+      <tr>
+        {[
+          "GSTIN",
+          "Vendor name",
+          "Invoice no.",
+          "Invoice date",
+          "Place of supply",
+          "Invoice value",
+          "Taxable value",
+          "IGST",
+          "CGST",
+          "SGST",
+          "Total tax",
+          "Tax %",
+          "ITC eligible",
+        ].map((h) => (
+          <th key={h} style={TH_STYLE}>
+            {h}
+          </th>
+        ))}
+      </tr>
+    </>
+  ) : (
+    <tr>
+      {["Vendor", "Invoice No.", "Date", "Amount"].map((h) => (
+        <th
+          key={h}
+          style={{
+            ...TH_STYLE,
+            padding: "14px 16px",
+            fontSize: "11px",
+            background: "#f8fafc",
+            color: "#475569",
+            textAlign: h === "Amount" ? "right" : "left",
+          }}
+        >
+          {h}
+        </th>
+      ))}
+    </tr>
+  )}
+</thead>
             <tbody>
               {slabs.map((s, i) => {
                 const tax = s.igst + s.cgst + s.sgst;
@@ -1194,6 +1286,173 @@ function ITCSummaryTab({ purchases, returns, filter }) {
   );
 }
 
+
+function PaymentsOutTab({ data, filter }) {
+
+  const rows = filterByDate(
+    data,
+    filter,
+    (row) => row.payment_date || row.createdAt
+  );
+
+  const totalAmount = rows.reduce(
+    (sum, row) => sum + Number(row.amount || 0),
+    0
+  );
+
+  return (
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2,1fr)",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+        <KpiCard
+          label="Total Payments"
+          value={rows.length}
+        />
+
+        <KpiCard
+          label="Total Amount Paid"
+          value={`₹ ${fmt(totalAmount)}`}
+          accent
+        />
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          overflow: "hidden",
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+          }}
+        >
+          <thead>
+            <tr>
+              {[
+                "Sr No",
+                "Vendor",
+                "Payment Date",
+                "Payment Mode",
+                "Reference No.",
+                "Amount",
+              ].map((h) => (
+                <th key={h} style={TH_STYLE}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {rows.length === 0 ? (
+              <EmptyState colSpan={6} />
+            ) : (
+              rows.map((p, i) => (
+                <tr
+                  key={i}
+                  style={{
+                    background:
+                      i % 2 === 0
+                        ? "#fff"
+                        : "#fafafa",
+                  }}
+                >
+                  <td style={TD_STYLE}>
+                    {i + 1}
+                  </td>
+
+             <td
+  style={{
+    ...TD_STYLE,
+    textAlign: "left",
+  }}
+>
+  {p.vendor_name ||
+    p.company_name ||
+    p.vendor_id?.company_name ||
+    p.vendor_id?.vendor_name ||
+    p.purchase_id?.vendor_name ||
+    p.purchase_id?.company_name ||
+    p.purchase_id?.vendor_id?.company_name ||
+    "—"}
+</td>
+
+                  <td style={TD_STYLE}>
+                    {fmtDate(
+                      p.payment_date ||
+                        p.createdAt
+                    )}
+                  </td>
+
+                  <td style={TD_STYLE}>
+                    {p.payment_mode || "—"}
+                  </td>
+
+                 <td style={TD_STYLE}>
+  {p.invoice_no ||
+    p.purchase_invoice_no ||
+    p.purchase_id?.supplier_invoice_no ||
+    p.purchase_id?.order_no ||
+    p.supplier_invoice_no ||
+    "—"}
+</td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                      fontWeight: 700,
+                    }}
+                  >
+                    ₹ {fmt(p.amount)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+
+          {rows.length > 0 && (
+            <tfoot>
+              <tr>
+                <td
+                  colSpan={5}
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    paddingRight: 12,
+                  }}
+                >
+                  Total
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    color: "#1d4ed8",
+                  }}
+                >
+                  ₹ {fmt(totalAmount)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </>
+  );
+}
+
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function GSTR2Reports() {
@@ -1206,9 +1465,10 @@ const isGSTUser =
   : NON_GST_TABS;
   const [activeTab,       setActiveTab]       = useState("Purchase");
   const [selectedFilter,  setSelectedFilter]  = useState("This Month");
-  const [purchases,       setPurchases]       = useState([]);
-  const [purchaseReturns, setPurchaseReturns] = useState([]);
-  const [debitNotes,      setDebitNotes]      = useState([]);
+const [purchases, setPurchases] = useState([]);
+const [purchaseReturns, setPurchaseReturns] = useState([]);
+const [debitNotes, setDebitNotes] = useState([]);
+const [paymentsOut, setPaymentsOut] = useState([]);
   const [loading,         setLoading]         = useState(false);
   const [exporting,       setExporting]       = useState(null); // "excel" | "pdf" | null
 
@@ -1223,6 +1483,24 @@ const isGSTUser =
     };
     load();
   }, []);
+
+
+  useEffect(() => {
+  const loadPayments = async () => {
+    try {
+      const res = await axios.get("http://localhost:8000/api/payment-out");
+
+      if (res.data.success) {
+        setPaymentsOut(res.data.data || []);
+      }
+    } catch (err) {
+      console.error("Payments fetch error:", err);
+    }
+  };
+
+  loadPayments();
+}, []);
+
 
   useEffect(() => {
     const load = async () => {
@@ -1341,19 +1619,254 @@ const isGSTUser =
         <div style={{ textAlign: "center", padding: "60px 0", color: "#9ca3af", fontSize: "13px" }}>Loading data…</div>
       )}
 
-      {/* Tab content */}
-      {!loading && (
-        <>
-          {activeTab === "Purchase"                        && <PurchaseTab
-  data={purchases}
-  filter={selectedFilter}
-  isGSTUser={isGSTUser}
-/>}
-          {activeTab === "Purchase Return / Debit Note"    && <PurchaseReturnTab data={[...purchaseReturns, ...debitNotes]} filter={selectedFilter} />}
-          {activeTab === "Purchase Summary"                && <PurchaseSummaryTab data={purchases}                         filter={selectedFilter} />}
-          {activeTab === "ITC Summary"                     && <ITCSummaryTab      purchases={purchases} returns={[...purchaseReturns, ...debitNotes]} filter={selectedFilter} />}
-        </>
-      )}
+  {/* Tab content */}
+{!loading && (
+  <>
+    {activeTab === "Purchase" && (
+      <PurchaseTab
+        data={purchases}
+        filter={selectedFilter}
+        isGSTUser={isGSTUser}
+      />
+    )}
+
+    {activeTab === "Payments Out" && (
+      <PaymentsOutTab
+        data={paymentsOut}
+        filter={selectedFilter}
+      />
+    )}
+
+{activeTab === "Purchase & Payments" && (() => {
+
+  const purchaseRows = filterByDate(
+    purchases,
+    selectedFilter,
+    "invoice_date"
+  ).map((p) => ({
+    type: "Purchase",
+    date: p.invoice_date,
+ vendor:
+  p.vendor_name ||
+  p.company_name ||
+  p.vendor_id?.company_name ||
+  p.vendor_id?.vendor_name ||
+  p.purchase_id?.vendor_name ||
+  p.purchase_id?.company_name ||
+  p.purchase_id?.vendor_id?.company_name ||
+  "—",
+    invoice:
+      p.supplier_invoice_no ||
+      p.order_no ||
+      "—",
+    mode: "—",
+    amount: Number(p.total_amount || 0),
+  }));
+
+  const paymentRows = filterByDate(
+    paymentsOut,
+    selectedFilter,
+    (r) => r.payment_date || r.createdAt
+  ).map((p) => ({
+    type: "Payment",
+    date: p.payment_date || p.createdAt,
+    vendor:
+      p.vendor_name ||
+      p.company_name ||
+      "—",
+ invoice:
+  p.invoice_no ||
+  p.purchase_invoice_no ||
+  p.purchase_id?.supplier_invoice_no ||
+  p.purchase_id?.order_no ||
+  p.supplier_invoice_no ||
+  "—",
+    mode:
+      p.payment_mode || "—",
+    amount: Number(p.amount || 0),
+  }));
+
+  const rows = [...purchaseRows, ...paymentRows]
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const total = rows.reduce(
+    (s, r) => s + r.amount,
+    0
+  );
+
+  return (
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(2,1fr)",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+        <KpiCard
+          label="Total Entries"
+          value={rows.length}
+        />
+
+        <KpiCard
+          label="Total Amount"
+          value={`₹ ${fmt(total)}`}
+          accent
+        />
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 10,
+          overflow: "hidden",
+        }}
+      >
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+          }}
+        >
+          <thead>
+            <tr>
+              {[
+                "Sr No",
+                "Type",
+                "Vendor",
+                "Invoice / Ref No.",
+                "Payment Mode",
+                "Date",
+                "Amount",
+              ].map((h) => (
+                <th key={h} style={TH_STYLE}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {rows.length === 0 ? (
+              <EmptyState colSpan={7} />
+            ) : (
+              rows.map((r, i) => (
+                <tr
+                  key={i}
+                  style={{
+                    background:
+                      i % 2 === 0
+                        ? "#fff"
+                        : "#fafafa",
+                  }}
+                >
+                  <td style={TD_STYLE}>
+                    {i + 1}
+                  </td>
+
+                  <td style={TD_STYLE}>
+                    <Badge
+                      color={
+                        r.type === "Purchase"
+                          ? "blue"
+                          : "green"
+                      }
+                    >
+                      {r.type}
+                    </Badge>
+                  </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "left",
+                    }}
+                  >
+                    {r.vendor}
+                  </td>
+
+                  <td style={TD_STYLE}>
+                    {r.invoice}
+                  </td>
+
+                  <td style={TD_STYLE}>
+                    {r.mode}
+                  </td>
+
+                  <td style={TD_STYLE}>
+                    {fmtDate(r.date)}
+                  </td>
+
+                  <td
+                    style={{
+                      ...TD_STYLE,
+                      textAlign: "right",
+                      fontWeight: 700,
+                    }}
+                  >
+                    ₹ {fmt(r.amount)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+
+          {rows.length > 0 && (
+            <tfoot>
+              <tr>
+                <td
+                  colSpan={6}
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    paddingRight: 12,
+                  }}
+                >
+                  Total
+                </td>
+
+                <td
+                  style={{
+                    ...TF_STYLE,
+                    textAlign: "right",
+                    color: "#1d4ed8",
+                  }}
+                >
+                  ₹ {fmt(total)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </>
+  );
+})()}
+
+    {activeTab === "Purchase Return / Debit Note" && (
+      <PurchaseReturnTab
+        data={[...purchaseReturns, ...debitNotes]}
+        filter={selectedFilter}
+      />
+    )}
+
+    {activeTab === "Purchase Summary" && (
+      <PurchaseSummaryTab
+        data={purchases}
+        filter={selectedFilter}
+      />
+    )}
+
+    {activeTab === "ITC Summary" && (
+      <ITCSummaryTab
+        purchases={purchases}
+        returns={[...purchaseReturns, ...debitNotes]}
+        filter={selectedFilter}
+      />
+    )}
+  </>
+)}
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>

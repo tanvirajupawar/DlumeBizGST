@@ -171,12 +171,35 @@ const { user, logout } = useAuth();
   navigate("/");
 };
 
-    const isRouteActive = (path) => {
-      return (
-        location.pathname === path ||
-        location.pathname.startsWith(path + "/")
-      );
-    };
+const isRouteActive = (path) => {
+
+  // ✅ CUSTOMER DETAILS ACTIVE
+  if (
+    path === "/customer-list" &&
+    (
+      location.pathname.includes("customer") ||
+      location.pathname.includes("Customer")
+    )
+  ) {
+    return true;
+  }
+
+  // ✅ VENDOR DETAILS ACTIVE
+  if (
+    path === "/vendor-list" &&
+    (
+      location.pathname.includes("vendor") ||
+      location.pathname.includes("Vendor")
+    )
+  ) {
+    return true;
+  }
+
+  return (
+    location.pathname === path ||
+    location.pathname.startsWith(path + "/")
+  );
+};
 
     // Check if any child path is active (for parent dropdown highlight)
     const isChildActive = (children) => {

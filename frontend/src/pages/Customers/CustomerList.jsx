@@ -45,7 +45,10 @@ const exportData = customers.map((c, index) => ({
     c.state,
   ].filter(Boolean).join(", ") || "-",
   phone: c.contact_no_1 || c.contact_no_2 || "-",
-  outstanding: c.computed_outstanding || 0,
+
+  outstanding:
+    Number(c.computed_outstanding || 0) +
+    Number(c.opening_balance || 0),
 }));
 
 const exportColumns = [
@@ -273,8 +276,10 @@ data={customers.map((c, index) => {
     phone: c.contact_no_1 || c.contact_no_2 || "-",
 
     // ✅ FIXED
-    outstanding: `₹${c.computed_outstanding || 0}`,
-  };
+outstanding: `₹${(
+  Number(c.computed_outstanding || 0) +
+  Number(c.opening_balance || 0)
+).toLocaleString("en-IN")}`,  };
 })}
   searchPlaceholder="Search customers..."
 

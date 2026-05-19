@@ -476,29 +476,58 @@ const totalCollected = filteredCollections.reduce(
 
                     {/* Pay button */}
                     <div className="py-4 flex justify-center" onClick={(e) => e.stopPropagation()}>
-                    <button
-disabled={!inv.customer_id || inv.pendingAmount <= 0}
+                 <button
+  disabled={!inv.customer_id || inv.pendingAmount <= 0}
+
   onClick={() => setPaymentTarget(inv)}
-className={`flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-semibold transition
-${
-  inv.customer_id && inv.pendingAmount > 0
-    ? "border-[#1e3a8a] text-[#1e3a8a] hover:bg-[#1e3a8a] hover:text-white"
-    : "border-gray-300 text-gray-400 cursor-not-allowed bg-gray-100"
-}`}                      >
-                        <FiCreditCard size={11} />
-                        Pay
-                      </button>
+
+  className={`flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-semibold transition
+  ${
+    inv.customer_id && inv.pendingAmount > 0
+      ? "border-[#1e3a8a] text-[#1e3a8a] hover:bg-[#1e3a8a] hover:text-white"
+      : "border-gray-300 text-gray-400 cursor-not-allowed bg-gray-100"
+  }`}
+>
+  <FiCreditCard size={11} />
+
+  {inv.pendingAmount <= 0
+    ? "Paid"
+    : "Pay"}
+</button>
                     </div>
 
                     <div className="py-4 flex justify-center" onClick={(e) => e.stopPropagation()}>
-                      <ActionMenu
-                        type="sales"
-                        invoice={inv}
-                        onEdit={() => navigate(`/sales-invoice/${inv.id}/edit`)}
-                        onSalesReturn={() => setSalesReturnTarget(inv)}
-                        onCreditNote={() => setCreditNoteTarget(inv)}
-                        onDelete={() => handleDelete(inv.id)}
-                      />
+               <ActionMenu
+  type="sales"
+  invoice={inv}
+
+  isGST={!!inv.customer?.gstin}
+
+  onEdit={
+    inv.pendingAmount <= 0
+      ? null
+      : () =>
+          navigate(
+            `/sales-invoice/${inv.id}/edit`
+          )
+  }
+
+  disableEdit={
+    inv.pendingAmount <= 0
+  }
+
+  onSalesReturn={() =>
+    setSalesReturnTarget(inv)
+  }
+
+  onCreditNote={() =>
+    setCreditNoteTarget(inv)
+  }
+
+  onDelete={() =>
+    handleDelete(inv.id)
+  }
+/>
                     </div>
                   </div>
                 </div>
